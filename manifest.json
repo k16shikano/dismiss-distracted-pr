@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Twitter Ad Filter",
+  "version": "1.0",
+  "description": "Auto-dismiss Twitter ads with emojis, hashtags, or empty lines.",
+  "permissions": [],
+  "content_scripts": [
+    {
+      "matches": ["*://x.com/*"],
+      "js": ["dist/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": ["*://x.com/*"],
+  "action": {
+    "default_title": "Twitter Ad Filter"
+  }
+}
