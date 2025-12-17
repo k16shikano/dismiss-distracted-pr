@@ -608,28 +608,58 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
   closePremiumPlusModal();
 }
 
-// MutationObserverで動的追加にも対応（より早く検出）
+// MutationObserverで動的追加にも対応（描画更新を即座に検出して処理）
 const observer = new MutationObserver((mutations) => {
-  // article要素が追加された瞬間を検出
-  let hasNewTweets = false;
+  // 追加されたarticle要素を即座に検出して処理
+  const newTweets: HTMLElement[] = [];
+  
   for (const mutation of mutations) {
     if (mutation.type === 'childList') {
       for (const node of Array.from(mutation.addedNodes)) {
         if (node.nodeType === Node.ELEMENT_NODE) {
           const element = node as HTMLElement;
-          // article要素またはarticle要素を含む要素が追加された
-          if (element.tagName === 'ARTICLE' || element.querySelector('article')) {
-            hasNewTweets = true;
-            break;
+          
+          // article要素が直接追加された場合
+          if (element.tagName === 'ARTICLE') {
+            if (!processedTweets.has(element) && !hiddenTweets.has(element)) {
+              newTweets.push(element);
+            }
+          }
+          // article要素を含む要素が追加された場合
+          else {
+            const articles = element.querySelectorAll('article');
+            for (const article of Array.from(articles)) {
+              const articleEl = article as HTMLElement;
+              if (!processedTweets.has(articleEl) && !hiddenTweets.has(articleEl)) {
+                newTweets.push(articleEl);
+              }
+            }
           }
         }
       }
     }
-    if (hasNewTweets) break;
   }
   
-  if (hasNewTweets && !scrollTimeout) {
-    // より早く処理するため、待機時間を短縮
+  // 新しいツイートが見つかった場合、即座に処理
+  if (newTweets.length > 0) {
+    console.log(`[DEBUG] Detected ${newTweets.length} new tweets, processing immediately`);
+    
+    // 即座に非表示にして処理開始
+    for (const tweetEl of newTweets) {
+      hideTweet(tweetEl);
+    }
+    
+    // 処理を開始（既に処理中の場合はキューに追加）
+    if (!isProcessing) {
+      processTweetsInParallel(newTweets);
+    } else {
+      // 既に処理中の場合は、次のスキャンで処理される
+      // ただし、新しいツイートは既に非表示になっている
+    }
+  }
+  
+  // 従来のスキャンも実行（既存のツイートもチェック）
+  if (!scrollTimeout) {
     scrollTimeout = setTimeout(() => {
       scanTweets();
       scrollTimeout = null;
