@@ -167,59 +167,71 @@ function isNotFollowingAccount(tweetElement: HTMLElement): Promise<boolean> {
     }
     
     // メニューを開く
+    console.log(`[DEBUG] Opening menu for @${accountName || 'unknown'}`);
     (moreBtn as HTMLElement).click();
     
-    // メニューが表示されるまで待つ
-    setTimeout(() => {
+    // メニューが表示されるまで待つ（ポーリングで確認）
+    let attempts = 0;
+    const maxAttempts = 20; // 最大2秒待つ（100ms × 20）
+    
+    const checkMenu = () => {
       const menuItems = Array.from(document.querySelectorAll('[role="menuitem"]')) as HTMLElement[];
-      console.log(`[DEBUG] Found ${menuItems.length} menu items for @${accountName || 'unknown'}`);
       
-      if (menuItems.length > 0) {
-        console.log(`[DEBUG] Menu items:`, menuItems.map(item => item.innerText?.substring(0, 50)));
-      }
-      
-      // メニュー項目を確認
-      // 「Xさんのフォローを解除」→ フォローしている
-      // 「Xさんをフォロー」→ フォローしていない
-      
-      const unfollowItem = menuItems.find(item => {
-        const text = item.innerText || '';
-        return /フォローを解除|Unfollow/i.test(text);
-      });
-      
-      if (unfollowItem) {
-        console.log(`[DEBUG] @${accountName || 'unknown'}: Following (found "Unfollow" menu item)`);
-        console.log(`[DEBUG] Menu item text: "${unfollowItem.innerText?.substring(0, 50)}"`);
+      if (menuItems.length > 0 || attempts >= maxAttempts) {
+        console.log(`[DEBUG] Found ${menuItems.length} menu items for @${accountName || 'unknown'} (attempts: ${attempts})`);
+        
+        if (menuItems.length > 0) {
+          console.log(`[DEBUG] Menu items:`, menuItems.map(item => item.innerText?.substring(0, 50)));
+        }
+        
+        // メニュー項目を確認
+        // 「Xさんのフォローを解除」→ フォローしている
+        // 「Xさんをフォロー」→ フォローしていない
+        
+        const unfollowItem = menuItems.find(item => {
+          const text = item.innerText || '';
+          return /フォローを解除|Unfollow/i.test(text);
+        });
+        
+        if (unfollowItem) {
+          console.log(`[DEBUG] @${accountName || 'unknown'}: Following (found "Unfollow" menu item)`);
+          console.log(`[DEBUG] Menu item text: "${unfollowItem.innerText?.substring(0, 50)}"`);
+          // メニューを閉じる（ESCキーを送信）
+          const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
+          document.dispatchEvent(escEvent);
+          setTimeout(() => resolve(false), 200); // フォローしている → 表示
+          return;
+        }
+        
+        const followItem = menuItems.find(item => {
+          const text = item.innerText || '';
+          // 「フォロー」を含むが「フォローを解除」を含まない
+          return /フォロー|Follow/i.test(text) && !/フォローを解除|Unfollow/i.test(text);
+        });
+        
+        if (followItem) {
+          console.log(`[DEBUG] @${accountName || 'unknown'}: Not following (found "Follow" menu item)`);
+          console.log(`[DEBUG] Menu item text: "${followItem.innerText?.substring(0, 50)}"`);
+          // メニューを閉じる（ESCキーを送信）
+          const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
+          document.dispatchEvent(escEvent);
+          setTimeout(() => resolve(true), 200); // フォローしていない → 非表示
+          return;
+        }
+        
+        // メニュー項目が見つからない場合
+        console.log(`[DEBUG] @${accountName || 'unknown'}: No follow/unfollow menu items found`);
         // メニューを閉じる（ESCキーを送信）
         const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
         document.dispatchEvent(escEvent);
-        setTimeout(() => resolve(false), 100); // フォローしている → 表示
-        return;
+        setTimeout(() => resolve(false), 200); // デフォルトで「フォローしている」と判定（表示する）
+      } else {
+        attempts++;
+        setTimeout(checkMenu, 100);
       }
-      
-      const followItem = menuItems.find(item => {
-        const text = item.innerText || '';
-        // 「フォロー」を含むが「フォローを解除」を含まない
-        return /フォロー|Follow/i.test(text) && !/フォローを解除|Unfollow/i.test(text);
-      });
-      
-      if (followItem) {
-        console.log(`[DEBUG] @${accountName || 'unknown'}: Not following (found "Follow" menu item)`);
-        console.log(`[DEBUG] Menu item text: "${followItem.innerText?.substring(0, 50)}"`);
-        // メニューを閉じる（ESCキーを送信）
-        const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
-        document.dispatchEvent(escEvent);
-        setTimeout(() => resolve(true), 100); // フォローしていない → 非表示
-        return;
-      }
-      
-      // メニュー項目が見つからない場合
-      console.log(`[DEBUG] @${accountName || 'unknown'}: No follow/unfollow menu items found`);
-      // メニューを閉じる（ESCキーを送信）
-      const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
-      document.dispatchEvent(escEvent);
-      setTimeout(() => resolve(false), 100); // デフォルトで「フォローしている」と判定（表示する）
-    }, 300);
+    };
+    
+    setTimeout(checkMenu, 100);
   });
 }
 
