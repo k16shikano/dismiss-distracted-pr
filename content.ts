@@ -7,6 +7,9 @@ const processedTweets = new Set<HTMLElement>();
 // 処理中フラグ（同時に複数のツイートを処理しないようにする）
 let isProcessing = false;
 
+// 一時的に非表示にしたツイート（フィルタリング中）
+const hiddenTweets = new Map<HTMLElement, { display: string; visibility: string }>();
+
 // 非表示にしたツイートの記録
 function logDismissedTweet(accountName: string | null, reason: string): void {
   const timestamp = new Date().toLocaleTimeString();
@@ -237,7 +240,11 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
           console.log(`[DEBUG] Menu item text: "${unfollowItem.innerText?.substring(0, 50)}"`);
           // メニューを閉じる（Moreボタンを再度クリック）
           closeMenu(moreBtn as HTMLElement);
-          setTimeout(() => resolve(false), 300); // フォローしている → 表示
+          // フォローしているので再表示
+          setTimeout(() => {
+            showTweet(tweetElement);
+            resolve(false); // フォローしている → 表示
+          }, 300);
           return;
         }
         
@@ -279,7 +286,11 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
         console.log(`[DEBUG] @${accountName || 'unknown'}: No follow/unfollow menu items found`);
         // メニューを閉じる
         closeMenu(moreBtn as HTMLElement);
-        setTimeout(() => resolve(false), 300); // デフォルトで「フォローしている」と判定（表示する）
+        // デフォルトで「フォローしている」と判定して再表示
+        setTimeout(() => {
+          showTweet(tweetElement);
+          resolve(false); // デフォルトで「フォローしている」と判定（表示する）
+        }, 300);
       } else {
         attempts++;
         setTimeout(checkMenu, 100);
@@ -493,8 +504,41 @@ async function processMenuQueue(): Promise<void> {
   }, 800);
 }
 
+// ツイートを一時的に非表示にする
+function hideTweet(tweetEl: HTMLElement): void {
+  if (hiddenTweets.has(tweetEl)) {
+    return; // 既に非表示
+  }
+  
+  const style = window.getComputedStyle(tweetEl);
+  hiddenTweets.set(tweetEl, {
+    display: style.display,
+    visibility: style.visibility
+  });
+  
+  // 即座に非表示
+  (tweetEl as HTMLElement).style.display = 'none';
+}
+
+// ツイートを再表示する
+function showTweet(tweetEl: HTMLElement): void {
+  const saved = hiddenTweets.get(tweetEl);
+  if (saved) {
+    (tweetEl as HTMLElement).style.display = saved.display;
+    (tweetEl as HTMLElement).style.visibility = saved.visibility;
+    hiddenTweets.delete(tweetEl);
+  }
+}
+
 // 複数のツイートを並列で処理
 async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
+  // まず、すべてのツイートを一時的に非表示にする（描画前に処理）
+  for (const tweetEl of tweets) {
+    if (!processedTweets.has(tweetEl)) {
+      hideTweet(tweetEl);
+    }
+  }
+  
   const promises: Promise<void>[] = [];
   
   for (const tweetEl of tweets) {
@@ -516,6 +560,7 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
             console.log(`[DEBUG] @${accountName || 'unknown'}: Promoted tweet, muting...`);
             muteAccount(tweetEl);
             processedTweets.add(tweetEl);
+            // 非表示のまま（ミュートされるので）
             return;
           }
         }
@@ -534,6 +579,8 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
         processMenuQueue();
       } catch (error) {
         console.error('Error processing tweet:', error);
+        // エラーが発生した場合は再表示
+        showTweet(tweetEl);
       }
     })();
     
@@ -548,18 +595,45 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   
+  // フィルタリング結果に基づいて、表示すべきツイートを再表示
+  for (const tweetEl of tweets) {
+    if (hiddenTweets.has(tweetEl) && !processedTweets.has(tweetEl)) {
+      // 処理済みでない（表示すべき）ツイートを再表示
+      showTweet(tweetEl);
+    }
+  }
+  
   console.log(`[DEBUG] Finished processing ${tweets.length} tweets`);
   isProcessing = false;
   closePremiumPlusModal();
 }
 
-// MutationObserverで動的追加にも対応
-const observer = new MutationObserver(() => {
-  if (!scrollTimeout) {
+// MutationObserverで動的追加にも対応（より早く検出）
+const observer = new MutationObserver((mutations) => {
+  // article要素が追加された瞬間を検出
+  let hasNewTweets = false;
+  for (const mutation of mutations) {
+    if (mutation.type === 'childList') {
+      for (const node of Array.from(mutation.addedNodes)) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const element = node as HTMLElement;
+          // article要素またはarticle要素を含む要素が追加された
+          if (element.tagName === 'ARTICLE' || element.querySelector('article')) {
+            hasNewTweets = true;
+            break;
+          }
+        }
+      }
+    }
+    if (hasNewTweets) break;
+  }
+  
+  if (hasNewTweets && !scrollTimeout) {
+    // より早く処理するため、待機時間を短縮
     scrollTimeout = setTimeout(() => {
       scanTweets();
       scrollTimeout = null;
-    }, 500);
+    }, 100);
   }
 });
 
