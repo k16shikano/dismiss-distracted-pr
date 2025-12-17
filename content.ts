@@ -141,32 +141,43 @@ function muteAccount(tweetElement: HTMLElement): void {
   }, 300);
 }
 
-// メニューを閉じる（複数の方法を試す）
-function closeMenu(): void {
-  // 方法1: ESCキーを送信
-  const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true, cancelable: true });
-  document.dispatchEvent(escEvent);
+// メニューを閉じる（Moreボタンを再度クリックするか、メニューの外側をクリック）
+function closeMenu(moreButton?: HTMLElement | null): void {
+  // 方法1: Moreボタンを再度クリック（メニューを開いたボタンを再度クリックすると閉じる）
+  if (moreButton) {
+    moreButton.click();
+    return;
+  }
   
-  // 方法2: メニューの外側をクリック
-  setTimeout(() => {
-    // メニュー要素を探す
-    const menu = document.querySelector('[role="menu"]');
-    if (menu) {
-      // メニューの外側（body）をクリック
-      const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
-      document.body.dispatchEvent(clickEvent);
-    } else {
-      // メニューが見つからない場合、画面の左上をクリック
-      const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 0, clientY: 0 });
-      document.body.dispatchEvent(clickEvent);
+  // 方法2: メニュー要素の外側をクリック
+  const menu = document.querySelector('[role="menu"]');
+  if (menu) {
+    const rect = menu.getBoundingClientRect();
+    // メニューの左上の外側をクリック
+    const clickX = Math.max(0, rect.left - 10);
+    const clickY = Math.max(0, rect.top - 10);
+    
+    const elementBelow = document.elementFromPoint(clickX, clickY);
+    if (elementBelow && elementBelow !== menu && !menu.contains(elementBelow)) {
+      (elementBelow as HTMLElement).click();
+      return;
     }
-  }, 50);
+    
+    // メニューの右下の外側をクリック
+    const clickX2 = rect.right + 10;
+    const clickY2 = rect.bottom + 10;
+    const elementBelow2 = document.elementFromPoint(clickX2, clickY2);
+    if (elementBelow2 && elementBelow2 !== menu && !menu.contains(elementBelow2)) {
+      (elementBelow2 as HTMLElement).click();
+      return;
+    }
+  }
   
-  // 方法3: もう一度ESCキーを送信（念のため）
-  setTimeout(() => {
-    const escEvent2 = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true, cancelable: true });
-    document.dispatchEvent(escEvent2);
-  }, 100);
+  // 方法3: 画面の左上の要素をクリック
+  const topLeftElement = document.elementFromPoint(10, 10);
+  if (topLeftElement && topLeftElement !== document.body) {
+    (topLeftElement as HTMLElement).click();
+  }
 }
 
 // メニューを開いて、フォロー状態を判定し、必要に応じて非表示にする
@@ -224,9 +235,9 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
         if (unfollowItem) {
           console.log(`[DEBUG] @${accountName || 'unknown'}: Following (found "Unfollow" menu item)`);
           console.log(`[DEBUG] Menu item text: "${unfollowItem.innerText?.substring(0, 50)}"`);
-          // メニューを閉じる（複数の方法を試す）
-          closeMenu();
-          setTimeout(() => resolve(false), 500); // フォローしている → 表示
+          // メニューを閉じる（Moreボタンを再度クリック）
+          closeMenu(moreBtn as HTMLElement);
+          setTimeout(() => resolve(false), 300); // フォローしている → 表示
           return;
         }
         
@@ -258,8 +269,8 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
           } else {
             console.warn(`[DEBUG] "Not interested" menu item not found`);
             // メニューを閉じる
-            closeMenu();
-            setTimeout(() => resolve(true), 500); // フォローしていないが、メニュー項目が見つからなかった
+            closeMenu(moreBtn as HTMLElement);
+            setTimeout(() => resolve(true), 300); // フォローしていないが、メニュー項目が見つからなかった
             return;
           }
         }
@@ -267,8 +278,8 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
         // メニュー項目が見つからない場合
         console.log(`[DEBUG] @${accountName || 'unknown'}: No follow/unfollow menu items found`);
         // メニューを閉じる
-        closeMenu();
-        setTimeout(() => resolve(false), 500); // デフォルトで「フォローしている」と判定（表示する）
+        closeMenu(moreBtn as HTMLElement);
+        setTimeout(() => resolve(false), 300); // デフォルトで「フォローしている」と判定（表示する）
       } else {
         attempts++;
         setTimeout(checkMenu, 100);
