@@ -7,6 +7,12 @@ const processedTweets = new Set<HTMLElement>();
 // 処理中フラグ（同時に複数のツイートを処理しないようにする）
 let isProcessing = false;
 
+// 非表示にしたツイートの記録
+function logDismissedTweet(accountName: string | null, reason: string): void {
+  const timestamp = new Date().toLocaleTimeString();
+  console.log(`[${timestamp}] Dismissed: @${accountName || 'unknown'} - ${reason}`);
+}
+
 function isInViewport(element: HTMLElement): boolean {
   const rect = element.getBoundingClientRect();
   return (
@@ -31,23 +37,17 @@ function containsEmptyLine(text: string): boolean {
 }
 
 function isPromoted(tweetElement: HTMLElement): boolean {
-  const isPromoted = tweetElement.innerText.includes("プロモーション");
-  console.log('Tweet content:', tweetElement.innerText);
-  console.log('Is promoted:', isPromoted);
-  return isPromoted;
+  return tweetElement.innerText.includes("プロモーション");
 }
 
 function getAccountName(tweetElement: HTMLElement): string | null {
   const accountLink = tweetElement.querySelector('a[role="link"]');
   if (!accountLink) {
-    console.log('Account link not found');
     return null;
   }
   
   const href = accountLink.getAttribute('href');
-  const accountName = href ? href.substring(1) : null;
-  console.log('Found account:', accountName);
-  return accountName;
+  return href ? href.substring(1) : null;
 }
 
 function shouldDismiss(text: string): boolean {
@@ -61,39 +61,24 @@ function shouldDismiss(text: string): boolean {
   if (hasEmptyLine) reasons.push("空行");
   
   // 2つ以上の条件が揃った場合のみミュート
-  const shouldMute = reasons.length >= 2;
-  
-  if (reasons.length > 0) {
-    console.log('検出された条件:', reasons.join('、'));
-    console.log('ミュート判定:', shouldMute ? 'ミュートします' : 'スキップします');
-  }
-  
-  return shouldMute;
+  return reasons.length >= 2;
 }
 
 function closePremiumPlusModal() {
-  // モーダルの特徴的なテキストやクラス名で検出
   const modal = Array.from(document.querySelectorAll('[role="dialog"], [data-testid="sheetDialog"]'))
     .find(el => el.textContent?.includes("プレミアムプラス") || el.textContent?.includes("Premium+"));
   if (modal) {
-    // 閉じるボタンを探してクリック
     const closeBtn = modal.querySelector('div[aria-label="閉じる"], div[aria-label="Close"]');
     if (closeBtn) {
       (closeBtn as HTMLElement).click();
-      console.log("プレミアムプラスのモーダルを自動で閉じました");
     } else {
-      // ボタンが見つからない場合は強制的に非表示
       (modal as HTMLElement).style.display = "none";
-      console.log("プレミアムプラスのモーダルを強制的に非表示にしました");
     }
   }
 }
 
 function closeMuteToast() {
-  // トーストの検出方法を改善
   const toasts = Array.from(document.querySelectorAll('[role="alert"], [data-testid="toast"], [data-testid="toastContainer"] div'));
-  console.log('Found toasts:', toasts.map(t => t.textContent));
-  
   const toast = toasts.find(el => {
     const text = el.textContent || '';
     return text.includes("ミュートしました") || 
@@ -102,64 +87,41 @@ function closeMuteToast() {
   });
   
   if (toast) {
-    console.log('Found mute toast:', toast.textContent);
-    // トーストをクリックして閉じる
     (toast as HTMLElement).click();
-    console.log("ミュート通知を自動で閉じました");
-    
-    // グレーアウトのオーバーレイを非表示
     const overlays = document.querySelectorAll('[role="presentation"]');
     overlays.forEach(overlay => {
       if (overlay instanceof HTMLElement) {
         overlay.style.display = "none";
-        console.log("オーバーレイを非表示にしました");
       }
     });
-  } else {
-    console.log('No mute toast found');
   }
 }
 
 function muteAccount(tweetElement: HTMLElement): void {
-  console.log('Attempting to mute account...');
-  // 新しいセレクタを試す
   const moreBtn = tweetElement.querySelector('[aria-label="More"]') || 
                  tweetElement.querySelector('[aria-label="その他"]') ||
                  tweetElement.querySelector('[data-testid="caret"]');
   
   if (!moreBtn) {
-    console.log('More button not found. Available elements:', 
-      Array.from(tweetElement.querySelectorAll('*')).map(el => ({
-        tag: el.tagName,
-        ariaLabel: el.getAttribute('aria-label'),
-        testId: el.getAttribute('data-testid')
-      }))
-    );
     return;
   }
 
-  console.log('Clicking more button...');
   (moreBtn as HTMLElement).click();
 
   setTimeout(() => {
     const menuItems = Array.from(document.querySelectorAll('[role="menuitem"]')) as HTMLElement[];
-    console.log('Found menu items:', menuItems.map(item => item.innerText));
-    
     const muteItem = menuItems.find(item => 
       item.innerText.includes("ミュート") || 
       item.innerText.includes("Mute")
     );
     if (muteItem) {
-      console.log('Clicking mute button...');
+      const accountName = getAccountName(tweetElement);
       muteItem.click();
-      console.log(`Muted account: ${getAccountName(tweetElement)}`);
+      logDismissedTweet(accountName, "プロモーション（条件を満たす）");
       
-      // ミュート後の通知を閉じる（複数回試行）
       setTimeout(closeMuteToast, 500);
       setTimeout(closeMuteToast, 1000);
       setTimeout(closeMuteToast, 1500);
-    } else {
-      console.log('Mute button not found in menu');
     }
   }, 300);
 }
@@ -198,16 +160,7 @@ function isNotFollowingAccount(tweetElement: HTMLElement): boolean {
   }
   
   // フォローボタンが見つかった場合、フォローしていない
-  const isNotFollowing = followButton !== null;
-  
-  console.log('Checking if not following account:', {
-    hasFollowButton: isNotFollowing,
-    hasFollowingButton: followingButton !== null,
-    accountName: getAccountName(tweetElement),
-    tweetText: tweetElement.innerText.substring(0, 100)
-  });
-  
-  return isNotFollowing;
+  return followButton !== null;
 }
 
 // リツイートかどうかを判定
@@ -226,16 +179,7 @@ function isRetweet(tweetElement: HTMLElement): boolean {
   // リツイートアイコンを探す
   const retweetIcon = tweetElement.querySelector('[data-testid="retweet"]');
   
-  const isRT = retweetIndicator !== null || retweetIcon !== null || hasRetweetText;
-  
-  console.log('Checking if retweet:', {
-    hasRetweetIndicator: retweetIndicator !== null,
-    hasRetweetIcon: retweetIcon !== null,
-    hasRetweetText: hasRetweetText,
-    isRetweet: isRT
-  });
-  
-  return isRT;
+  return retweetIndicator !== null || retweetIcon !== null || hasRetweetText;
 }
 
 // リツイートの元のツイート主のアカウント名を取得
@@ -245,33 +189,20 @@ function getOriginalTweetAuthor(tweetElement: HTMLElement): string | null {
   // 最初のリンクはリツイートした人、2番目以降が元のツイート主の可能性がある
   
   const allLinks = Array.from(tweetElement.querySelectorAll('a[role="link"][href^="/"]'));
-  console.log('Found links in retweet:', allLinks.map(link => link.getAttribute('href')));
   
   // リツイートの場合、元のツイート主のリンクを探す
-  // 通常、リツイートの構造では、元のツイート主の情報が特定の位置にある
-  // より確実な方法として、ツイートのテキストからアカウント名を抽出する
   const textContent = tweetElement.innerText || '';
-  
-  // リツイートの場合、元のツイート主のアカウント名が表示されている
-  // 例: "ユーザー名 @accountname · 時間" のような形式
   const accountMatch = textContent.match(/@(\w+)/);
   if (accountMatch && accountMatch.length > 1) {
-    // 最初の@マークの後のアカウント名を取得（リツイートした人ではなく、元のツイート主）
-    // リツイートの構造を考慮して、適切なアカウント名を取得
-    const accountName = accountMatch[1];
-    console.log('Found original tweet author:', accountName);
-    return accountName;
+    return accountMatch[1];
   }
   
   // リンクから取得を試みる
   if (allLinks.length > 1) {
-    // 2番目のリンクが元のツイート主の可能性が高い
     const originalAuthorLink = allLinks[1];
     const href = originalAuthorLink.getAttribute('href');
     if (href) {
-      const accountName = href.substring(1).split('/')[0];
-      console.log('Found original tweet author from link:', accountName);
-      return accountName;
+      return href.substring(1).split('/')[0];
     }
   }
   
@@ -433,79 +364,52 @@ function isNotRetweetFromFollowing(tweetElement: HTMLElement): boolean {
   
   // リツイートの場合、安全のため「フォローしていない」と判定する
   // 「フォロー中」ボタンが明確に見つかった場合のみ例外
-  const result = isNotFromFollowing || defaultToNotFollowing;
-  
-  console.log('Checking if not retweet from following:', {
-    isRetweet: true,
-    hasFollowButton: isNotFromFollowing,
-    hasFollowingButton: followingButton !== null,
-    originalAuthor: originalAuthor,
-    hasOriginalAuthorElement: originalAuthorElement !== null,
-    defaultToNotFollowing: defaultToNotFollowing,
-    result: result
-  });
-  
-  // リツイートの場合、安全のため「フォローしていない」と判定
-  // 「フォロー中」ボタンが明確に見つかった場合のみ例外
-  return result;
+  return isNotFromFollowing || defaultToNotFollowing;
 }
 
 // 「興味がない」メニューをクリック
-function dismissAsNotInterested(tweetElement: HTMLElement): void {
-  console.log('Attempting to dismiss as not interested...');
-  // 新しいセレクタを試す
+function dismissAsNotInterested(tweetElement: HTMLElement, reason: string): void {
   const moreBtn = tweetElement.querySelector('[aria-label="More"]') || 
                  tweetElement.querySelector('[aria-label="その他"]') ||
                  tweetElement.querySelector('[data-testid="caret"]');
   
   if (!moreBtn) {
-    console.log('More button not found');
     return;
   }
 
-  console.log('Clicking more button...');
   (moreBtn as HTMLElement).click();
 
   setTimeout(() => {
     const menuItems = Array.from(document.querySelectorAll('[role="menuitem"]')) as HTMLElement[];
-    console.log('Found menu items:', menuItems.map(item => item.innerText));
-    
     const notInterestedItem = menuItems.find(item => 
       item.innerText.includes("興味がない") || 
       item.innerText.includes("Not interested") ||
       item.innerText.includes("Not interested in this")
     );
     if (notInterestedItem) {
-      console.log('Clicking "Not interested" button...');
+      const accountName = getAccountName(tweetElement);
       notInterestedItem.click();
-      console.log('Dismissed as not interested');
-    } else {
-      console.log('"Not interested" button not found in menu');
+      logDismissedTweet(accountName, reason);
     }
   }, 300);
 }
 
 function scanTweets(): void {
-  console.log('=== scanTweets() called ===');
-  
   // 既に処理中の場合はスキップ
   if (isProcessing) {
-    console.log('Already processing, skipping this scan...');
     return;
   }
   
   const tweetArticles = document.querySelectorAll('article');
-  console.log(`Found ${tweetArticles.length} article elements`);
   
   if (tweetArticles.length === 0) {
-    console.log('No tweets found, waiting for content to load...');
     return;
   }
   
   // 処理対象のツイートを収集（処理済みでない、ビューポート内のもの）
   const tweetsToProcess: HTMLElement[] = [];
   
-  tweetArticles.forEach((article, index) => {
+  tweetArticles.forEach((article) => {
     const tweetEl = article as HTMLElement;
     
     // すでに処理済みのツイートはスキップ
@@ -519,10 +423,7 @@ function scanTweets(): void {
     }
   });
   
-  console.log(`Found ${tweetsToProcess.length} tweets to process`);
-  
   if (tweetsToProcess.length === 0) {
-    console.log('No new tweets to process');
     closePremiumPlusModal();
     return;
   }
@@ -536,16 +437,12 @@ function scanTweets(): void {
 
 function processNextTweet(tweets: HTMLElement[], index: number): void {
   if (index >= tweets.length) {
-    console.log(`=== All ${tweets.length} tweets processed ===`);
     isProcessing = false;
     closePremiumPlusModal();
     return;
   }
   
   const tweetEl = tweets[index];
-  console.log(`\n=== Processing tweet ${index + 1}/${tweets.length} ===`);
-  const accountName = getAccountName(tweetEl);
-  console.log('Account:', accountName);
   
   // プロモーションツイートの処理
   const isPromo = isPromoted(tweetEl);
@@ -553,9 +450,7 @@ function processNextTweet(tweets: HTMLElement[], index: number): void {
   
   if (isPromo) {
     const text = tweetEl.innerText;
-    console.log('Promoted tweet detected, checking conditions...');
     if (shouldDismiss(text)) {
-      console.log('Conditions met, muting account...');
       muteAccount(tweetEl);
       processedTweets.add(tweetEl);
       shouldSkip = true;
@@ -564,8 +459,6 @@ function processNextTweet(tweets: HTMLElement[], index: number): void {
         processNextTweet(tweets, index + 1);
       }, 2000);
       return;
-    } else {
-      console.log('Conditions not met, skipping...');
     }
   }
   
@@ -573,36 +466,28 @@ function processNextTweet(tweets: HTMLElement[], index: number): void {
   if (!shouldSkip) {
     // リツイートかどうかを先に確認
     const isRT = isRetweet(tweetEl);
-    console.log('Is retweet:', isRT);
     
     if (isRT) {
       // リツイートの場合：フォローしている人からのリツイートではない場合のみ「興味がない」に分類
       if (isNotRetweetFromFollowing(tweetEl)) {
-        console.log('>>> ACTION: Dismissing retweet from non-following account');
-        dismissAsNotInterested(tweetEl);
+        dismissAsNotInterested(tweetEl, "リツイート（フォローしていないアカウント）");
         processedTweets.add(tweetEl);
         // 非同期処理なので、少し待ってから次へ
         setTimeout(() => {
           processNextTweet(tweets, index + 1);
         }, 1500);
         return;
-      } else {
-        console.log('Retweet from following account, keeping it');
       }
     } else {
       // 通常のツイートの場合：フォローしていないアカウントによるツイートを「興味がない」に分類
-      console.log('Checking if not following account...');
       if (isNotFollowingAccount(tweetEl)) {
-        console.log('>>> ACTION: Dismissing tweet from non-following account');
-        dismissAsNotInterested(tweetEl);
+        dismissAsNotInterested(tweetEl, "フォローしていないアカウント");
         processedTweets.add(tweetEl);
         // 非同期処理なので、少し待ってから次へ
         setTimeout(() => {
           processNextTweet(tweets, index + 1);
         }, 1500);
         return;
-      } else {
-        console.log('Tweet from following account, keeping it');
       }
     }
   }
@@ -614,10 +499,8 @@ function processNextTweet(tweets: HTMLElement[], index: number): void {
 
 // MutationObserverで動的追加にも対応
 const observer = new MutationObserver(() => {
-  // スクロールイベントの頻度を制限
   if (!scrollTimeout) {
     scrollTimeout = setTimeout(() => {
-      console.log('DOM changed, scanning tweets...');
       scanTweets();
       scrollTimeout = null;
     }, 500);
@@ -627,15 +510,11 @@ const observer = new MutationObserver(() => {
 // document.bodyが存在する場合のみobserverを設定
 if (document.body) {
   observer.observe(document.body, { childList: true, subtree: true });
-  console.log('MutationObserver initialized');
 } else {
-  console.log('document.body not found, waiting...');
-  // document.bodyが存在しない場合、DOMContentLoadedを待つ
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       if (document.body) {
         observer.observe(document.body, { childList: true, subtree: true });
-        console.log('MutationObserver initialized after DOMContentLoaded');
       }
     });
   }
@@ -645,29 +524,19 @@ if (document.body) {
 window.addEventListener('scroll', () => {
   if (!scrollTimeout) {
     scrollTimeout = setTimeout(() => {
-      console.log('Scroll detected, scanning tweets...');
       scanTweets();
       scrollTimeout = null;
     }, 500);
   }
 });
 
-// スクリプトが読み込まれたことを明確に示す
+// スクリプトの初期化
 try {
-  console.log('=== Twitter Ad Filter Extension Loaded ===');
-  console.log('Script is running on:', window.location.href);
-  console.log('Document ready state:', document.readyState);
-  console.log('Document body exists:', document.body !== null);
-  
-  // DOMが完全に読み込まれるまで待つ
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-      console.log('DOM Content Loaded, starting initial scan...');
       setTimeout(() => scanTweets(), 1000);
     });
   } else {
-    console.log('DOM already loaded, starting initial scan...');
-    // DOMが完全に読み込まれるまで少し待つ
     setTimeout(() => scanTweets(), 1000);
   }
 } catch (error) {
