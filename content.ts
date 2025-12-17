@@ -133,23 +133,22 @@ function muteAccount(tweetElement: HTMLElement): void {
 
 // フォローしていないアカウントかどうかを判定
 function isNotFollowingAccount(tweetElement: HTMLElement): boolean {
+  const accountName = getAccountName(tweetElement);
+  
   // まず「フォロー中」ボタンを探す（フォローしている場合）
   const followingButton = tweetElement.querySelector('[data-testid*="unfollow"], [aria-label*="フォロー中"], [aria-label*="Following"]');
   
   if (followingButton) {
-    console.log('Found "Following" button, account is followed');
     return false; // フォローしている
   }
   
   // 次に「フォロー」ボタンを探す（フォローしていない場合）
-  // data-testid="follow"を探す
   let followButton = tweetElement.querySelector('[data-testid="follow"]');
   
   if (!followButton) {
     // より広範囲にボタンを探す
     const buttons = Array.from(tweetElement.querySelectorAll('button, div[role="button"], span[role="button"], a[role="button"]'));
     
-    // aria-labelで「フォロー」または「Follow」を含むが、「フォロー中」や「Following」を含まないボタンを探す
     const foundButton = buttons.find(btn => {
       const label = btn.getAttribute('aria-label') || '';
       const text = btn.textContent || '';
@@ -164,8 +163,16 @@ function isNotFollowingAccount(tweetElement: HTMLElement): boolean {
     followButton = foundButton ? foundButton as HTMLElement : null;
   }
   
-  // フォローボタンが見つかった場合、フォローしていない
-  return followButton !== null;
+  const isNotFollowing = followButton !== null;
+  
+  // デバッグログ
+  if (isNotFollowing) {
+    console.log(`[DEBUG] @${accountName || 'unknown'}: Not following (found Follow button)`);
+  } else {
+    console.log(`[DEBUG] @${accountName || 'unknown'}: Following or unable to determine`);
+  }
+  
+  return isNotFollowing;
 }
 
 // リツイートかどうかを判定
@@ -305,7 +312,7 @@ function isNotRetweetFromFollowing(tweetElement: HTMLElement): boolean {
   }
   
   if (followingButton) {
-    console.log('Retweet from following account (found Following button near original author)');
+    console.log(`[DEBUG] Retweet from @${originalAuthor || 'unknown'}: Following account (found Following button)`);
     return false; // フォローしている人からのリツイート
   }
   
@@ -367,51 +374,79 @@ function isNotRetweetFromFollowing(tweetElement: HTMLElement): boolean {
   // 「フォロー中」ボタンが明確に見つかった場合のみ「フォローしている」と判定
   const defaultToNotFollowing = followButton === null && followingButton === null;
   
+  const result = isNotFromFollowing || defaultToNotFollowing;
+  console.log(`[DEBUG] Retweet from @${originalAuthor || 'unknown'}: Not from following = ${result} (hasFollowButton: ${isNotFromFollowing}, defaultToNotFollowing: ${defaultToNotFollowing})`);
+  
   // リツイートの場合、安全のため「フォローしていない」と判定する
   // 「フォロー中」ボタンが明確に見つかった場合のみ例外
-  return isNotFromFollowing || defaultToNotFollowing;
+  return result;
 }
 
 // 「興味がない」メニューをクリック
 function dismissAsNotInterested(tweetElement: HTMLElement, reason: string): void {
-  const moreBtn = tweetElement.querySelector('[aria-label="More"]') || 
+  const accountName = getAccountName(tweetElement);
+  console.log(`[DEBUG] Attempting to dismiss @${accountName || 'unknown'}: ${reason}`);
+  
+  // より広範囲にMoreボタンを探す
+  let moreBtn = tweetElement.querySelector('[aria-label="More"]') || 
                  tweetElement.querySelector('[aria-label="その他"]') ||
                  tweetElement.querySelector('[data-testid="caret"]');
   
+  // 追加のセレクタを試す
   if (!moreBtn) {
-    const accountName = getAccountName(tweetElement);
+    const allButtons = Array.from(tweetElement.querySelectorAll('button, div[role="button"]'));
+    moreBtn = allButtons.find(btn => {
+      const label = btn.getAttribute('aria-label') || '';
+      return /More|その他/i.test(label);
+    }) as HTMLElement | null;
+  }
+  
+  if (!moreBtn) {
     console.warn(`[${new Date().toLocaleTimeString()}] Failed to dismiss @${accountName || 'unknown'}: More button not found`);
     return;
   }
 
+  console.log(`[DEBUG] Clicking More button for @${accountName || 'unknown'}`);
   (moreBtn as HTMLElement).click();
 
+  // メニューが表示されるまで少し長めに待つ
   setTimeout(() => {
     const menuItems = Array.from(document.querySelectorAll('[role="menuitem"]')) as HTMLElement[];
-    const notInterestedItem = menuItems.find(item => 
-      item.innerText.includes("興味がない") || 
-      item.innerText.includes("Not interested") ||
-      item.innerText.includes("Not interested in this")
-    );
+    console.log(`[DEBUG] Found ${menuItems.length} menu items`);
+    
+    if (menuItems.length > 0) {
+      console.log(`[DEBUG] Menu items:`, menuItems.map(item => item.innerText?.substring(0, 50)));
+    }
+    
+    const notInterestedItem = menuItems.find(item => {
+      const text = item.innerText || '';
+      return text.includes("興味がない") || 
+             text.includes("Not interested") ||
+             text.includes("Not interested in this") ||
+             text.includes("興味がありません");
+    });
+    
     if (notInterestedItem) {
-      const accountName = getAccountName(tweetElement);
+      console.log(`[DEBUG] Found "Not interested" menu item, clicking...`);
       notInterestedItem.click();
       logDismissedTweet(accountName, reason);
     } else {
-      const accountName = getAccountName(tweetElement);
       console.warn(`[${new Date().toLocaleTimeString()}] Failed to dismiss @${accountName || 'unknown'}: "Not interested" menu item not found`);
+      console.warn(`[DEBUG] Available menu items:`, menuItems.map(item => item.innerText?.substring(0, 50)));
     }
-  }, 300);
+  }, 500); // 待機時間を延長
 }
 
 function scanTweets(): void {
   try {
     // 既に処理中の場合はスキップ
     if (isProcessing) {
+      console.log('[DEBUG] Already processing, skipping scan');
       return;
     }
     
     const tweetArticles = document.querySelectorAll('article');
+    console.log(`[DEBUG] Found ${tweetArticles.length} article elements`);
     
     if (tweetArticles.length === 0) {
       return;
@@ -434,6 +469,8 @@ function scanTweets(): void {
       }
     });
     
+    console.log(`[DEBUG] Found ${tweetsToProcess.length} tweets to process`);
+    
     if (tweetsToProcess.length === 0) {
       closePremiumPlusModal();
       return;
@@ -441,6 +478,7 @@ function scanTweets(): void {
     
     // 処理開始
     isProcessing = true;
+    console.log(`[DEBUG] Starting to process ${tweetsToProcess.length} tweets`);
     
     // 最初のツイートを処理
     processNextTweet(tweetsToProcess, 0);
@@ -453,20 +491,25 @@ function scanTweets(): void {
 function processNextTweet(tweets: HTMLElement[], index: number): void {
   try {
     if (index >= tweets.length) {
+      console.log(`[DEBUG] Finished processing ${tweets.length} tweets`);
       isProcessing = false;
       closePremiumPlusModal();
       return;
     }
     
     const tweetEl = tweets[index];
+    const accountName = getAccountName(tweetEl);
+    console.log(`[DEBUG] Processing tweet ${index + 1}/${tweets.length}: @${accountName || 'unknown'}`);
     
     // プロモーションツイートの処理
     const isPromo = isPromoted(tweetEl);
     let shouldSkip = false;
     
     if (isPromo) {
+      console.log(`[DEBUG] @${accountName || 'unknown'}: Promoted tweet detected`);
       const text = tweetEl.innerText;
       if (shouldDismiss(text)) {
+        console.log(`[DEBUG] @${accountName || 'unknown'}: Conditions met, muting...`);
         muteAccount(tweetEl);
         processedTweets.add(tweetEl);
         shouldSkip = true;
@@ -475,6 +518,8 @@ function processNextTweet(tweets: HTMLElement[], index: number): void {
           processNextTweet(tweets, index + 1);
         }, 2000);
         return;
+      } else {
+        console.log(`[DEBUG] @${accountName || 'unknown'}: Promoted but conditions not met`);
       }
     }
     
@@ -482,10 +527,13 @@ function processNextTweet(tweets: HTMLElement[], index: number): void {
     if (!shouldSkip) {
       // リツイートかどうかを先に確認
       const isRT = isRetweet(tweetEl);
+      console.log(`[DEBUG] @${accountName || 'unknown'}: Is retweet: ${isRT}`);
       
       if (isRT) {
         // リツイートの場合：フォローしている人からのリツイートではない場合のみ「興味がない」に分類
-        if (isNotRetweetFromFollowing(tweetEl)) {
+        const notFromFollowing = isNotRetweetFromFollowing(tweetEl);
+        console.log(`[DEBUG] @${accountName || 'unknown'}: Not retweet from following: ${notFromFollowing}`);
+        if (notFromFollowing) {
           dismissAsNotInterested(tweetEl, "リツイート（フォローしていないアカウント）");
           processedTweets.add(tweetEl);
           // 非同期処理なので、少し待ってから次へ
@@ -496,7 +544,9 @@ function processNextTweet(tweets: HTMLElement[], index: number): void {
         }
       } else {
         // 通常のツイートの場合：フォローしていないアカウントによるツイートを「興味がない」に分類
-        if (isNotFollowingAccount(tweetEl)) {
+        const notFollowing = isNotFollowingAccount(tweetEl);
+        console.log(`[DEBUG] @${accountName || 'unknown'}: Not following account: ${notFollowing}`);
+        if (notFollowing) {
           dismissAsNotInterested(tweetEl, "フォローしていないアカウント");
           processedTweets.add(tweetEl);
           // 非同期処理なので、少し待ってから次へ
@@ -509,6 +559,7 @@ function processNextTweet(tweets: HTMLElement[], index: number): void {
     }
     
     // 処理が不要な場合、すぐに次へ
+    console.log(`[DEBUG] @${accountName || 'unknown'}: Keeping tweet (following account or other reason)`);
     processedTweets.add(tweetEl);
     processNextTweet(tweets, index + 1);
   } catch (error) {
