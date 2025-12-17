@@ -158,6 +158,68 @@ function muteAccount(tweetElement: HTMLElement): void {
   }, 300);
 }
 
+// フォローしていないアカウントかどうかを判定
+function isNotFollowingAccount(tweetElement: HTMLElement): boolean {
+  // 「フォロー」ボタンがあるかどうかで判定
+  const followButton = tweetElement.querySelector('[data-testid="follow"], [aria-label*="フォロー"], [aria-label*="Follow"]');
+  const isNotFollowing = followButton !== null;
+  console.log('Is not following account:', isNotFollowing);
+  return isNotFollowing;
+}
+
+// フォローしている人からのリツイートではないかどうかを判定
+function isNotRetweetFromFollowing(tweetElement: HTMLElement): boolean {
+  // リツイートの表示を探す
+  const retweetIndicator = tweetElement.querySelector('[data-testid="socialContext"], [data-testid="retweet"]');
+  
+  if (!retweetIndicator) {
+    // リツイートではない場合は、フォローしていないアカウントからのツイートとして扱う
+    return isNotFollowingAccount(tweetElement);
+  }
+  
+  // リツイートの場合、フォローしている人からのリツイートかどうかを判定
+  // リツイート要素内に「フォロー」ボタンがない場合は、フォローしている人からのリツイート
+  const followButtonInRetweet = retweetIndicator.closest('article')?.querySelector('[data-testid="follow"]');
+  const isFromFollowing = followButtonInRetweet === null;
+  console.log('Is not retweet from following:', !isFromFollowing);
+  return !isFromFollowing;
+}
+
+// 「興味がない」メニューをクリック
+function dismissAsNotInterested(tweetElement: HTMLElement): void {
+  console.log('Attempting to dismiss as not interested...');
+  // 新しいセレクタを試す
+  const moreBtn = tweetElement.querySelector('[aria-label="More"]') || 
+                 tweetElement.querySelector('[aria-label="その他"]') ||
+                 tweetElement.querySelector('[data-testid="caret"]');
+  
+  if (!moreBtn) {
+    console.log('More button not found');
+    return;
+  }
+
+  console.log('Clicking more button...');
+  (moreBtn as HTMLElement).click();
+
+  setTimeout(() => {
+    const menuItems = Array.from(document.querySelectorAll('[role="menuitem"]')) as HTMLElement[];
+    console.log('Found menu items:', menuItems.map(item => item.innerText));
+    
+    const notInterestedItem = menuItems.find(item => 
+      item.innerText.includes("興味がない") || 
+      item.innerText.includes("Not interested") ||
+      item.innerText.includes("Not interested in this")
+    );
+    if (notInterestedItem) {
+      console.log('Clicking "Not interested" button...');
+      notInterestedItem.click();
+      console.log('Dismissed as not interested');
+    } else {
+      console.log('"Not interested" button not found in menu');
+    }
+  }, 300);
+}
+
 function scanTweets(): void {
   console.log('Scanning tweets...');
   const tweetArticles = document.querySelectorAll('article');
@@ -177,6 +239,8 @@ function scanTweets(): void {
     // ビューポート内のツイートのみを処理
     if (isInViewport(tweetEl)) {
       console.log(`\nAnalyzing tweet ${index + 1} in viewport:`);
+      
+      // プロモーションツイートの処理
       if (isPromoted(tweetEl)) {
         const text = tweetEl.innerText;
         console.log('Checking promotion conditions for:', text);
@@ -188,6 +252,20 @@ function scanTweets(): void {
         } else {
           console.log('Conditions not met, skipping...');
         }
+      }
+      
+      // フォローしていないアカウントによるツイートを「興味がない」に分類
+      if (isNotFollowingAccount(tweetEl)) {
+        console.log('Not following account, dismissing as not interested...');
+        dismissAsNotInterested(tweetEl);
+        processedTweets.add(tweetEl);
+      }
+      
+      // フォローしている人からのリツイートではないツイートを「興味がない」に分類
+      if (isNotRetweetFromFollowing(tweetEl)) {
+        console.log('Not retweet from following, dismissing as not interested...');
+        dismissAsNotInterested(tweetEl);
+        processedTweets.add(tweetEl);
       }
     }
   });
