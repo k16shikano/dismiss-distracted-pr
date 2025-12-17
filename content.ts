@@ -166,34 +166,45 @@ function muteAccount(tweetElement: HTMLElement): void {
 
 // フォローしていないアカウントかどうかを判定
 function isNotFollowingAccount(tweetElement: HTMLElement): boolean {
-  // フォローボタンを探す（複数のセレクタで試す）
+  // まず「フォロー中」ボタンを探す（フォローしている場合）
+  const followingButton = tweetElement.querySelector('[data-testid*="unfollow"], [aria-label*="フォロー中"], [aria-label*="Following"]');
+  
+  if (followingButton) {
+    console.log('Found "Following" button, account is followed');
+    return false; // フォローしている
+  }
+  
+  // 次に「フォロー」ボタンを探す（フォローしていない場合）
+  // data-testid="follow"を探す
   let followButton = tweetElement.querySelector('[data-testid="follow"]');
   
   if (!followButton) {
-    // aria-labelで探す
-    const buttons = Array.from(tweetElement.querySelectorAll('button, div[role="button"]'));
+    // より広範囲にボタンを探す
+    const buttons = Array.from(tweetElement.querySelectorAll('button, div[role="button"], span[role="button"], a[role="button"]'));
+    
+    // aria-labelで「フォロー」または「Follow」を含むが、「フォロー中」や「Following」を含まないボタンを探す
     const foundButton = buttons.find(btn => {
       const label = btn.getAttribute('aria-label') || '';
-      return /フォロー|Follow/i.test(label) && !/フォロー中|Following/i.test(label);
-    });
-    followButton = foundButton ? foundButton as HTMLElement : null;
-  }
-  
-  // テキスト内容でも確認（ボタン内のテキスト）
-  if (!followButton) {
-    const allButtons = Array.from(tweetElement.querySelectorAll('button, div[role="button"], span[role="button"]'));
-    const foundButton = allButtons.find(btn => {
       const text = btn.textContent || '';
-      return /^フォロー$|^Follow$/i.test(text.trim());
+      const hasFollowLabel = /フォロー|Follow/i.test(label);
+      const hasFollowingLabel = /フォロー中|Following/i.test(label);
+      const hasFollowText = /^フォロー$|^Follow$/i.test(text.trim());
+      const hasFollowingText = /フォロー中|Following/i.test(text);
+      
+      return (hasFollowLabel && !hasFollowingLabel) || (hasFollowText && !hasFollowingText);
     });
+    
     followButton = foundButton ? foundButton as HTMLElement : null;
   }
   
-  const isNotFollowing = followButton !== null && followButton !== undefined;
+  // フォローボタンが見つかった場合、フォローしていない
+  const isNotFollowing = followButton !== null;
   
   console.log('Checking if not following account:', {
     hasFollowButton: isNotFollowing,
-    accountName: getAccountName(tweetElement)
+    hasFollowingButton: followingButton !== null,
+    accountName: getAccountName(tweetElement),
+    tweetText: tweetElement.innerText.substring(0, 100)
   });
   
   return isNotFollowing;
@@ -235,33 +246,44 @@ function isNotRetweetFromFollowing(tweetElement: HTMLElement): boolean {
   }
   
   // リツイートの場合、元のツイート主がフォローしているかどうかを判定
-  // リツイート要素内に「フォロー」ボタンがある場合は、フォローしていないアカウントからのリツイート
-  const followButtonInRetweet = tweetElement.querySelector('[data-testid="follow"]');
+  // まず「フォロー中」ボタンを探す（フォローしている場合）
+  const followingButton = tweetElement.querySelector('[data-testid*="unfollow"], [aria-label*="フォロー中"], [aria-label*="Following"]');
   
-  if (!followButtonInRetweet) {
-    // aria-labelでも確認
-    const buttons = Array.from(tweetElement.querySelectorAll('button, div[role="button"]'));
+  if (followingButton) {
+    console.log('Retweet from following account (found Following button)');
+    return false; // フォローしている人からのリツイート
+  }
+  
+  // 次に「フォロー」ボタンを探す（フォローしていない場合）
+  let followButton = tweetElement.querySelector('[data-testid="follow"]');
+  
+  if (!followButton) {
+    // より広範囲にボタンを探す
+    const buttons = Array.from(tweetElement.querySelectorAll('button, div[role="button"], span[role="button"], a[role="button"]'));
     const followBtn = buttons.find(btn => {
       const label = btn.getAttribute('aria-label') || '';
-      return /フォロー|Follow/i.test(label) && !/フォロー中|Following/i.test(label);
+      const text = btn.textContent || '';
+      const hasFollowLabel = /フォロー|Follow/i.test(label);
+      const hasFollowingLabel = /フォロー中|Following/i.test(label);
+      const hasFollowText = /^フォロー$|^Follow$/i.test(text.trim());
+      const hasFollowingText = /フォロー中|Following/i.test(text);
+      
+      return (hasFollowLabel && !hasFollowingLabel) || (hasFollowText && !hasFollowingText);
     });
     
-    const isFromFollowing = followBtn === undefined;
-    console.log('Checking if not retweet from following:', {
-      isRetweet: true,
-      hasFollowButton: followBtn !== undefined,
-      isNotFromFollowing: !isFromFollowing
-    });
-    return !isFromFollowing;
+    followButton = followBtn ? followBtn as HTMLElement : null;
   }
+  
+  const isNotFromFollowing = followButton !== null;
   
   console.log('Checking if not retweet from following:', {
     isRetweet: true,
-    hasFollowButton: true,
-    isNotFromFollowing: true
+    hasFollowButton: isNotFromFollowing,
+    hasFollowingButton: followingButton !== null,
+    isNotFromFollowing: isNotFromFollowing
   });
   
-  return true;
+  return isNotFromFollowing;
 }
 
 // 「興味がない」メニューをクリック
