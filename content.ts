@@ -315,53 +315,60 @@ function scanTweets(): void {
       return;
     }
     
-    // ビューポート内のツイートのみを処理
-    if (isInViewport(tweetEl)) {
-      console.log(`\n=== Analyzing tweet ${index + 1} ===`);
-      const accountName = getAccountName(tweetEl);
-      console.log('Account:', accountName);
-      
-      // プロモーションツイートの処理
-      if (isPromoted(tweetEl)) {
-        const text = tweetEl.innerText;
-        console.log('Promoted tweet detected, checking conditions...');
-        if (shouldDismiss(text)) {
-          console.log('Conditions met, muting account...');
-          muteAccount(tweetEl);
-          processedTweets.add(tweetEl);
-          processedCount++;
-          return; // プロモーションツイートの処理が完了したら次へ
-        } else {
-          console.log('Conditions not met, skipping...');
+      // ビューポート内のツイートのみを処理
+      if (isInViewport(tweetEl)) {
+        console.log(`\n=== Analyzing tweet ${index + 1} ===`);
+        const accountName = getAccountName(tweetEl);
+        console.log('Account:', accountName);
+        
+        // プロモーションツイートの処理
+        const isPromo = isPromoted(tweetEl);
+        let shouldSkip = false;
+        
+        if (isPromo) {
+          const text = tweetEl.innerText;
+          console.log('Promoted tweet detected, checking conditions...');
+          if (shouldDismiss(text)) {
+            console.log('Conditions met, muting account...');
+            muteAccount(tweetEl);
+            processedTweets.add(tweetEl);
+            processedCount++;
+            shouldSkip = true; // プロモーションツイートの処理が完了したら次へ
+          } else {
+            console.log('Conditions not met, skipping...');
+          }
+        }
+        
+        // プロモーションツイートでない場合、またはプロモーションツイートでも条件を満たさない場合、フォロー/リツイート判定を実行
+        if (!shouldSkip) {
+          // リツイートかどうかを先に確認
+          const isRT = isRetweet(tweetEl);
+          console.log('Is retweet:', isRT);
+          
+          if (isRT) {
+            // リツイートの場合：フォローしている人からのリツイートではない場合のみ「興味がない」に分類
+            if (isNotRetweetFromFollowing(tweetEl)) {
+              console.log('>>> ACTION: Dismissing retweet from non-following account');
+              dismissAsNotInterested(tweetEl);
+              processedTweets.add(tweetEl);
+              processedCount++;
+            } else {
+              console.log('Retweet from following account, keeping it');
+            }
+          } else {
+            // 通常のツイートの場合：フォローしていないアカウントによるツイートを「興味がない」に分類
+            console.log('Checking if not following account...');
+            if (isNotFollowingAccount(tweetEl)) {
+              console.log('>>> ACTION: Dismissing tweet from non-following account');
+              dismissAsNotInterested(tweetEl);
+              processedTweets.add(tweetEl);
+              processedCount++;
+            } else {
+              console.log('Tweet from following account, keeping it');
+            }
+          }
         }
       }
-      
-      // リツイートかどうかを先に確認
-      const isRT = isRetweet(tweetEl);
-      console.log('Is retweet:', isRT);
-      
-      if (isRT) {
-        // リツイートの場合：フォローしている人からのリツイートではない場合のみ「興味がない」に分類
-        if (isNotRetweetFromFollowing(tweetEl)) {
-          console.log('>>> ACTION: Dismissing retweet from non-following account');
-          dismissAsNotInterested(tweetEl);
-          processedTweets.add(tweetEl);
-          processedCount++;
-        } else {
-          console.log('Retweet from following account, keeping it');
-        }
-      } else {
-        // 通常のツイートの場合：フォローしていないアカウントによるツイートを「興味がない」に分類
-        if (isNotFollowingAccount(tweetEl)) {
-          console.log('>>> ACTION: Dismissing tweet from non-following account');
-          dismissAsNotInterested(tweetEl);
-          processedTweets.add(tweetEl);
-          processedCount++;
-        } else {
-          console.log('Tweet from following account, keeping it');
-        }
-      }
-    }
   });
   
   console.log(`=== Scan complete: processed ${processedCount} tweets ===`);
