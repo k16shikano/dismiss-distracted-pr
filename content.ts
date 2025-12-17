@@ -190,14 +190,13 @@ function isNotFollowingAccount(tweetElement: HTMLElement): boolean {
   // デバッグログ
   if (isNotFollowing) {
     console.log(`[DEBUG] @${accountName || 'unknown'}: Not following (found Follow button)`);
+    return true; // 確実に「フォローしていない」と判定できる場合のみ非表示
   } else {
-    // ボタンが見つからない場合、デフォルトで「フォローしていない」と判定
-    // （フォローしている場合は「フォロー中」ボタンが表示されるはず）
-    console.log(`[DEBUG] @${accountName || 'unknown'}: Not following (no buttons found, defaulting to not following)`);
-    return true; // ボタンが見つからない場合は「フォローしていない」と判定
+    // ボタンが見つからない場合、安全のため「フォローしている」と判定
+    // （フォローしている人のツイートはすべてスルーする）
+    console.log(`[DEBUG] @${accountName || 'unknown'}: Following or unable to determine (keeping tweet)`);
+    return false; // ボタンが見つからない場合は「フォローしている」と判定（非表示にしない）
   }
-  
-  return isNotFollowing;
 }
 
 // リツイートかどうかを判定
@@ -452,19 +451,19 @@ function isNotRetweetFromFollowing(tweetElement: HTMLElement): boolean {
     followButton = followBtn ? followBtn as HTMLElement : null;
   }
   
-  // ボタンが見つからない場合、デフォルトで「フォローしていない」と判定
-  // リツイートの場合、元のツイート主の部分を正確に特定するのが難しいため、
-  // 「フォロー中」ボタンが明確に見つかった場合のみ「フォローしている」と判定
-  // それ以外は「フォローしていない」と判定する（より積極的に）
+  // 確実に「フォローしていない」と判定できる場合のみ非表示
+  // ボタンが見つからない場合は、安全のため「フォローしている」と判定（非表示にしない）
   const isNotFromFollowing = followButton !== null;
-  const defaultToNotFollowing = followButton === null && followingButton === null;
   
-  // リツイートした人がフォローしている場合でも、元のツイート主がフォローしていない場合は非表示
-  // 「フォロー中」ボタンが明確に見つかった場合のみ「フォローしている」と判定
-  const result = isNotFromFollowing || defaultToNotFollowing;
-  console.log(`[DEBUG] Retweet from @${originalAuthor || 'unknown'}: Not from following = ${result} (hasFollowButton: ${isNotFromFollowing}, defaultToNotFollowing: ${defaultToNotFollowing}, followingButton: ${followingButton !== null})`);
-  
-  return result;
+  if (isNotFromFollowing) {
+    console.log(`[DEBUG] Retweet from @${originalAuthor || 'unknown'}: Not from following (found Follow button)`);
+    return true; // 確実に「フォローしていない」と判定できる場合のみ非表示
+  } else {
+    // ボタンが見つからない場合、安全のため「フォローしている」と判定
+    // （フォローしている人のツイートはすべてスルーする）
+    console.log(`[DEBUG] Retweet from @${originalAuthor || 'unknown'}: Following or unable to determine (keeping tweet)`);
+    return false; // ボタンが見つからない場合は「フォローしている」と判定（非表示にしない）
+  }
 }
 
 // 「興味がない」メニューをクリック
