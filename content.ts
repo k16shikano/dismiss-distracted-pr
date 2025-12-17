@@ -141,70 +141,86 @@ function muteAccount(tweetElement: HTMLElement): void {
   }, 300);
 }
 
-// フォローしていないアカウントかどうかを判定
-function isNotFollowingAccount(tweetElement: HTMLElement): boolean {
-  const accountName = getAccountName(tweetElement);
-  console.log(`[DEBUG] Checking follow status for @${accountName || 'unknown'}`);
-  
-  // すべてのボタンを取得
-  const allButtons = Array.from(tweetElement.querySelectorAll('button, div[role="button"], span[role="button"], a[role="button"]'));
-  
-  // ボタンのテキスト内容で判定
-  // 「Xさんのフォローを解除」→ フォローしている
-  // 「Xさんをフォロー」→ フォローしていない
-  
-  // まず「フォローを解除」ボタンを探す（フォローしている場合）
-  const unfollowButton = allButtons.find(btn => {
-    const text = btn.textContent?.trim() || '';
-    const label = btn.getAttribute('aria-label') || '';
-    // 「フォローを解除」または「Unfollow」を含む
-    const matches = /フォローを解除|Unfollow/i.test(text) || /フォローを解除|Unfollow/i.test(label);
-    if (matches) {
-      console.log(`[DEBUG] Found unfollow button: text="${text.substring(0, 50)}", aria-label="${label.substring(0, 50)}"`);
+// フォローしていないアカウントかどうかを判定（メニュー項目を確認）
+function isNotFollowingAccount(tweetElement: HTMLElement): Promise<boolean> {
+  return new Promise((resolve) => {
+    const accountName = getAccountName(tweetElement);
+    console.log(`[DEBUG] Checking follow status for @${accountName || 'unknown'}`);
+    
+    // Moreボタンを探す
+    let moreBtn = tweetElement.querySelector('[aria-label="More"]') || 
+                   tweetElement.querySelector('[aria-label="その他"]') ||
+                   tweetElement.querySelector('[data-testid="caret"]');
+    
+    if (!moreBtn) {
+      const allButtons = Array.from(tweetElement.querySelectorAll('button, div[role="button"]'));
+      moreBtn = allButtons.find(btn => {
+        const label = btn.getAttribute('aria-label') || '';
+        return /More|その他/i.test(label);
+      }) as HTMLElement | null;
     }
-    return matches;
-  });
-  
-  if (unfollowButton) {
-    console.log(`[DEBUG] @${accountName || 'unknown'}: Following (found "Unfollow" button)`);
-    console.log(`[DEBUG] Button text: "${unfollowButton.textContent?.trim()?.substring(0, 50)}"`);
-    console.log(`[DEBUG] Button aria-label: "${unfollowButton.getAttribute('aria-label')?.substring(0, 50)}"`);
-    return false; // フォローしている → 表示
-  }
-  
-  // 次に「フォロー」ボタンを探す（フォローしていない場合）
-  const followButton = allButtons.find(btn => {
-    const text = btn.textContent?.trim() || '';
-    const label = btn.getAttribute('aria-label') || '';
-    // 「フォロー」または「Follow」を含むが、「フォローを解除」を含まない
-    const hasFollow = /フォロー|Follow/i.test(text) || /フォロー|Follow/i.test(label);
-    const hasUnfollow = /フォローを解除|Unfollow/i.test(text) || /フォローを解除|Unfollow/i.test(label);
-    const matches = hasFollow && !hasUnfollow;
-    if (matches) {
-      console.log(`[DEBUG] Found follow button: text="${text.substring(0, 50)}", aria-label="${label.substring(0, 50)}"`);
+    
+    if (!moreBtn) {
+      console.log(`[DEBUG] @${accountName || 'unknown'}: More button not found, defaulting to following`);
+      resolve(false); // ボタンが見つからない場合は「フォローしている」と判定（表示する）
+      return;
     }
-    return matches;
+    
+    // メニューを開く
+    (moreBtn as HTMLElement).click();
+    
+    // メニューが表示されるまで待つ
+    setTimeout(() => {
+      const menuItems = Array.from(document.querySelectorAll('[role="menuitem"]')) as HTMLElement[];
+      console.log(`[DEBUG] Found ${menuItems.length} menu items for @${accountName || 'unknown'}`);
+      
+      if (menuItems.length > 0) {
+        console.log(`[DEBUG] Menu items:`, menuItems.map(item => item.innerText?.substring(0, 50)));
+      }
+      
+      // メニュー項目を確認
+      // 「Xさんのフォローを解除」→ フォローしている
+      // 「Xさんをフォロー」→ フォローしていない
+      
+      const unfollowItem = menuItems.find(item => {
+        const text = item.innerText || '';
+        return /フォローを解除|Unfollow/i.test(text);
+      });
+      
+      if (unfollowItem) {
+        console.log(`[DEBUG] @${accountName || 'unknown'}: Following (found "Unfollow" menu item)`);
+        console.log(`[DEBUG] Menu item text: "${unfollowItem.innerText?.substring(0, 50)}"`);
+        // メニューを閉じる（ESCキーを送信）
+        const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
+        document.dispatchEvent(escEvent);
+        setTimeout(() => resolve(false), 100); // フォローしている → 表示
+        return;
+      }
+      
+      const followItem = menuItems.find(item => {
+        const text = item.innerText || '';
+        // 「フォロー」を含むが「フォローを解除」を含まない
+        return /フォロー|Follow/i.test(text) && !/フォローを解除|Unfollow/i.test(text);
+      });
+      
+      if (followItem) {
+        console.log(`[DEBUG] @${accountName || 'unknown'}: Not following (found "Follow" menu item)`);
+        console.log(`[DEBUG] Menu item text: "${followItem.innerText?.substring(0, 50)}"`);
+        // メニューを閉じる（ESCキーを送信）
+        const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
+        document.dispatchEvent(escEvent);
+        setTimeout(() => resolve(true), 100); // フォローしていない → 非表示
+        return;
+      }
+      
+      // メニュー項目が見つからない場合
+      console.log(`[DEBUG] @${accountName || 'unknown'}: No follow/unfollow menu items found`);
+      // メニューを閉じる（ESCキーを送信）
+      const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
+      document.dispatchEvent(escEvent);
+      setTimeout(() => resolve(false), 100); // デフォルトで「フォローしている」と判定（表示する）
+    }, 300);
   });
-  
-  if (followButton) {
-    console.log(`[DEBUG] @${accountName || 'unknown'}: Not following (found "Follow" button)`);
-    console.log(`[DEBUG] Button text: "${followButton.textContent?.trim()?.substring(0, 50)}"`);
-    console.log(`[DEBUG] Button aria-label: "${followButton.getAttribute('aria-label')?.substring(0, 50)}"`);
-    return true; // フォローしていない → 非表示
-  }
-  
-  // ボタンが見つからない場合
-  console.log(`[DEBUG] @${accountName || 'unknown'}: No follow buttons found`);
-  console.log(`[DEBUG] All button texts:`, allButtons.map(btn => ({
-    text: btn.textContent?.substring(0, 50),
-    ariaLabel: btn.getAttribute('aria-label'),
-    dataTestId: btn.getAttribute('data-testid')
-  })).filter(b => b.text || b.ariaLabel));
-  
-  // ボタンが見つからない場合、安全のため「フォローしている」と判定
-  // （フォローしている人のツイートを誤って非表示にしないようにする）
-  console.log(`[DEBUG] @${accountName || 'unknown'}: Defaulting to following (no buttons found, keeping tweet to avoid false positives)`);
-  return false; // ボタンが見つからない場合は「フォローしている」と判定（表示する）
 }
 
 // リツイートかどうかを判定
@@ -304,7 +320,7 @@ function getOriginalTweetAuthorElement(tweetElement: HTMLElement): HTMLElement |
 }
 
 // フォローしている人からのリツイートではないかどうかを判定
-function isNotRetweetFromFollowing(tweetElement: HTMLElement): boolean {
+async function isNotRetweetFromFollowing(tweetElement: HTMLElement): Promise<boolean> {
   // リツイートでない場合は、この関数では判定しない（isNotFollowingAccountで判定される）
   if (!isRetweet(tweetElement)) {
     return false;
@@ -316,7 +332,7 @@ function isNotRetweetFromFollowing(tweetElement: HTMLElement): boolean {
   
   // リツイートした人がフォローしているかどうかを先にチェック
   // リツイートした人がフォローしている場合、元のツイート主が見つからなくても「フォローしている」と判定
-  const isRetweeterFollowing = !isNotFollowingAccount(tweetElement);
+  const isRetweeterFollowing = !(await isNotFollowingAccount(tweetElement));
   console.log(`[DEBUG] Retweeter @${retweeterName || 'unknown'} is following: ${isRetweeterFollowing}`);
   
   // リツイートした人がフォローしていない場合、元のツイート主の判定は不要（リツイートした人からのリツイートなので非表示対象）
@@ -437,7 +453,7 @@ function scanTweets(): void {
   }
 }
 
-function processNextTweet(tweets: HTMLElement[], index: number): void {
+async function processNextTweet(tweets: HTMLElement[], index: number): Promise<void> {
   try {
     if (index >= tweets.length) {
       console.log(`[DEBUG] Finished processing ${tweets.length} tweets`);
@@ -480,7 +496,7 @@ function processNextTweet(tweets: HTMLElement[], index: number): void {
       
       if (isRT) {
         // リツイートの場合：フォローしている人からのリツイートではない場合のみ「興味がない」に分類
-        const notFromFollowing = isNotRetweetFromFollowing(tweetEl);
+        const notFromFollowing = await isNotRetweetFromFollowing(tweetEl);
         console.log(`[DEBUG] @${accountName || 'unknown'}: Not retweet from following: ${notFromFollowing}`);
         if (notFromFollowing) {
           dismissAsNotInterested(tweetEl, "リツイート（フォローしていないアカウント）");
@@ -493,7 +509,7 @@ function processNextTweet(tweets: HTMLElement[], index: number): void {
         }
       } else {
         // 通常のツイートの場合：フォローしていないアカウントによるツイートを「興味がない」に分類
-        const notFollowing = isNotFollowingAccount(tweetEl);
+        const notFollowing = await isNotFollowingAccount(tweetEl);
         console.log(`[DEBUG] @${accountName || 'unknown'}: Not following account: ${notFollowing}`);
         if (notFollowing) {
           dismissAsNotInterested(tweetEl, "フォローしていないアカウント");
