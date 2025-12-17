@@ -420,7 +420,7 @@ function scanTweets(): void {
       return;
     }
     
-    // 処理対象のツイートを収集（処理済みでない、ビューポート内のもの）
+    // 処理対象のツイートを収集（処理済みでない、すべてのツイートを先読み）
     const tweetsToProcess: HTMLElement[] = [];
     
     tweetArticles.forEach((article) => {
@@ -431,10 +431,8 @@ function scanTweets(): void {
         return;
       }
       
-      // ビューポート内のツイートのみを処理対象に追加
-      if (isInViewport(tweetEl)) {
-        tweetsToProcess.push(tweetEl);
-      }
+      // すべてのツイートを処理対象に追加（ビューポート外も含む）
+      tweetsToProcess.push(tweetEl);
     });
     
     console.log(`[DEBUG] Found ${tweetsToProcess.length} tweets to process`);
@@ -446,92 +444,113 @@ function scanTweets(): void {
     
     // 処理開始
     isProcessing = true;
-    console.log(`[DEBUG] Starting to process ${tweetsToProcess.length} tweets`);
+    console.log(`[DEBUG] Starting to process ${tweetsToProcess.length} tweets in parallel`);
     
-    // 最初のツイートを処理
-    processNextTweet(tweetsToProcess, 0);
+    // すべてのツイートを並列で処理（メニュー操作はキューで管理）
+    processTweetsInParallel(tweetsToProcess);
   } catch (error) {
     console.error('Error in scanTweets:', error);
     isProcessing = false;
   }
 }
 
-async function processNextTweet(tweets: HTMLElement[], index: number): Promise<void> {
-  try {
-    if (index >= tweets.length) {
-      console.log(`[DEBUG] Finished processing ${tweets.length} tweets`);
-      isProcessing = false;
-      closePremiumPlusModal();
-      return;
-    }
-    
-    const tweetEl = tweets[index];
-    const accountName = getAccountName(tweetEl);
-    console.log(`[DEBUG] Processing tweet ${index + 1}/${tweets.length}: @${accountName || 'unknown'}`);
-    
-    // プロモーションツイートの処理
-    const isPromo = isPromoted(tweetEl);
-    let shouldSkip = false;
-    
-    if (isPromo) {
-      console.log(`[DEBUG] @${accountName || 'unknown'}: Promoted tweet detected`);
-      const text = tweetEl.innerText;
-      if (shouldDismiss(text)) {
-        console.log(`[DEBUG] @${accountName || 'unknown'}: Conditions met, muting...`);
-        muteAccount(tweetEl);
-        processedTweets.add(tweetEl);
-        shouldSkip = true;
-        // ミュート処理は非同期なので、少し待ってから次へ
-        setTimeout(() => {
-          processNextTweet(tweets, index + 1);
-        }, 2000);
-        return;
-      } else {
-        console.log(`[DEBUG] @${accountName || 'unknown'}: Promoted but conditions not met`);
-      }
-    }
-    
-    // プロモーションツイートでない場合、またはプロモーションツイートでも条件を満たさない場合、フォロー/リツイート判定を実行
-    if (!shouldSkip) {
-      // リツイートかどうかを先に確認
-      const isRT = isRetweet(tweetEl);
-      console.log(`[DEBUG] @${accountName || 'unknown'}: Is retweet: ${isRT}`);
-      
-      if (isRT) {
-        // リツイートの場合：メニューを開いて判定し、必要に応じて非表示
-        const shouldDismiss = await checkAndDismissRetweet(tweetEl, "リツイート（フォローしていないアカウント）");
-        console.log(`[DEBUG] @${accountName || 'unknown'}: Should dismiss retweet: ${shouldDismiss}`);
-        if (shouldDismiss) {
-          processedTweets.add(tweetEl);
-          // 非同期処理なので、少し待ってから次へ
-          setTimeout(() => {
-            processNextTweet(tweets, index + 1);
-          }, 1500);
-          return;
-        }
-      } else {
-        // 通常のツイートの場合：メニューを開いて判定し、必要に応じて非表示
-        const shouldDismiss = await checkAndDismissTweet(tweetEl, "フォローしていないアカウント");
-        console.log(`[DEBUG] @${accountName || 'unknown'}: Should dismiss tweet: ${shouldDismiss}`);
-        if (shouldDismiss) {
-          processedTweets.add(tweetEl);
-          // 非同期処理なので、少し待ってから次へ
-          setTimeout(() => {
-            processNextTweet(tweets, index + 1);
-          }, 1500);
-          return;
-        }
-      }
-    }
-    
-    // 処理が不要な場合、すぐに次へ
-    console.log(`[DEBUG] @${accountName || 'unknown'}: Keeping tweet (following account or other reason)`);
-    processedTweets.add(tweetEl);
-    processNextTweet(tweets, index + 1);
-  } catch (error) {
-    console.error('Error in processNextTweet:', error);
-    isProcessing = false;
+// メニュー操作のキュー（同時に1つずつしか実行できない）
+const menuQueue: Array<{ tweet: HTMLElement; isRetweet: boolean; reason: string }> = [];
+let isProcessingMenu = false;
+
+// メニュー操作をキューに追加して順番に処理
+async function processMenuQueue(): Promise<void> {
+  if (isProcessingMenu || menuQueue.length === 0) {
+    return;
   }
+  
+  isProcessingMenu = true;
+  const item = menuQueue.shift();
+  if (!item) {
+    isProcessingMenu = false;
+    return;
+  }
+  
+  try {
+    const { tweet, isRetweet, reason } = item;
+    const accountName = getAccountName(tweet);
+    
+    if (isRetweet) {
+      await checkAndDismissRetweet(tweet, reason);
+    } else {
+      await checkAndDismissTweet(tweet, reason);
+    }
+    
+    processedTweets.add(tweet);
+  } catch (error) {
+    console.error('Error processing menu queue:', error);
+  }
+  
+  // 次のメニュー操作を処理（少し待ってから）
+  setTimeout(() => {
+    isProcessingMenu = false;
+    processMenuQueue();
+  }, 800);
+}
+
+// 複数のツイートを並列で処理
+async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
+  const promises: Promise<void>[] = [];
+  
+  for (const tweetEl of tweets) {
+    // すでに処理済みのツイートはスキップ
+    if (processedTweets.has(tweetEl)) {
+      continue;
+    }
+    
+    const promise = (async () => {
+      try {
+        const accountName = getAccountName(tweetEl);
+        console.log(`[DEBUG] Processing tweet: @${accountName || 'unknown'}`);
+        
+        // プロモーションツイートの処理（メニュー操作不要なので即座に処理）
+        const isPromo = isPromoted(tweetEl);
+        if (isPromo) {
+          const text = tweetEl.innerText;
+          if (shouldDismiss(text)) {
+            console.log(`[DEBUG] @${accountName || 'unknown'}: Promoted tweet, muting...`);
+            muteAccount(tweetEl);
+            processedTweets.add(tweetEl);
+            return;
+          }
+        }
+        
+        // リツイートかどうかを確認
+        const isRT = isRetweet(tweetEl);
+        
+        // メニュー操作が必要な場合はキューに追加
+        if (isRT) {
+          menuQueue.push({ tweet: tweetEl, isRetweet: true, reason: "リツイート（フォローしていないアカウント）" });
+        } else {
+          menuQueue.push({ tweet: tweetEl, isRetweet: false, reason: "フォローしていないアカウント" });
+        }
+        
+        // メニューキューを処理開始
+        processMenuQueue();
+      } catch (error) {
+        console.error('Error processing tweet:', error);
+      }
+    })();
+    
+    promises.push(promise);
+  }
+  
+  // すべての処理が完了するまで待機
+  await Promise.all(promises);
+  
+  // メニューキューが空になるまで待機
+  while (menuQueue.length > 0 || isProcessingMenu) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  
+  console.log(`[DEBUG] Finished processing ${tweets.length} tweets`);
+  isProcessing = false;
+  closePremiumPlusModal();
 }
 
 // MutationObserverで動的追加にも対応
