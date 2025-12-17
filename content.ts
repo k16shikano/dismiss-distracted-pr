@@ -103,6 +103,8 @@ function muteAccount(tweetElement: HTMLElement): void {
                  tweetElement.querySelector('[data-testid="caret"]');
   
   if (!moreBtn) {
+    const accountName = getAccountName(tweetElement);
+    console.warn(`[${new Date().toLocaleTimeString()}] Failed to mute @${accountName || 'unknown'}: More button not found`);
     return;
   }
 
@@ -122,6 +124,9 @@ function muteAccount(tweetElement: HTMLElement): void {
       setTimeout(closeMuteToast, 500);
       setTimeout(closeMuteToast, 1000);
       setTimeout(closeMuteToast, 1500);
+    } else {
+      const accountName = getAccountName(tweetElement);
+      console.warn(`[${new Date().toLocaleTimeString()}] Failed to mute @${accountName || 'unknown'}: Mute menu item not found`);
     }
   }, 300);
 }
@@ -374,6 +379,8 @@ function dismissAsNotInterested(tweetElement: HTMLElement, reason: string): void
                  tweetElement.querySelector('[data-testid="caret"]');
   
   if (!moreBtn) {
+    const accountName = getAccountName(tweetElement);
+    console.warn(`[${new Date().toLocaleTimeString()}] Failed to dismiss @${accountName || 'unknown'}: More button not found`);
     return;
   }
 
@@ -390,6 +397,9 @@ function dismissAsNotInterested(tweetElement: HTMLElement, reason: string): void
       const accountName = getAccountName(tweetElement);
       notInterestedItem.click();
       logDismissedTweet(accountName, reason);
+    } else {
+      const accountName = getAccountName(tweetElement);
+      console.warn(`[${new Date().toLocaleTimeString()}] Failed to dismiss @${accountName || 'unknown'}: "Not interested" menu item not found`);
     }
   }, 300);
 }
@@ -532,6 +542,7 @@ window.addEventListener('scroll', () => {
 
 // スクリプトの初期化
 try {
+  console.log('Twitter Ad Filter Extension: Initialized');
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => scanTweets(), 1000);
