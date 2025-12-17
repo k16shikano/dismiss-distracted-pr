@@ -201,23 +201,37 @@ function getOriginalTweetAuthor(tweetElement: HTMLElement): string | null {
   // 最初のリンクはリツイートした人、2番目以降が元のツイート主の可能性がある
   
   const allLinks = Array.from(tweetElement.querySelectorAll('a[role="link"][href^="/"]'));
+  const retweeterName = getAccountName(tweetElement);
   
-  // リツイートの場合、元のツイート主のリンクを探す
-  const textContent = tweetElement.innerText || '';
-  const accountMatch = textContent.match(/@(\w+)/);
-  if (accountMatch && accountMatch.length > 1) {
-    return accountMatch[1];
-  }
-  
-  // リンクから取得を試みる
-  if (allLinks.length > 1) {
-    const originalAuthorLink = allLinks[1];
-    const href = originalAuthorLink.getAttribute('href');
+  // リンクから取得を試みる（リツイートした人以外のリンクを探す）
+  for (let i = 0; i < allLinks.length; i++) {
+    const link = allLinks[i];
+    const href = link.getAttribute('href');
     if (href) {
-      return href.substring(1).split('/')[0];
+      const accountName = href.substring(1).split('/')[0];
+      // リツイートした人以外のアカウント名を返す
+      if (accountName && accountName !== retweeterName) {
+        console.log(`[DEBUG] Found original author from link: @${accountName} (retweeter: @${retweeterName})`);
+        return accountName;
+      }
     }
   }
   
+  // リンクから取得できない場合、テキストから取得を試みる
+  const textContent = tweetElement.innerText || '';
+  const accountMatches = textContent.match(/@(\w+)/g);
+  if (accountMatches && accountMatches.length > 1) {
+    // 2番目以降の@マッチが元のツイート主の可能性が高い
+    for (let i = 1; i < accountMatches.length; i++) {
+      const match = accountMatches[i].match(/@(\w+)/);
+      if (match && match[1] && match[1] !== retweeterName) {
+        console.log(`[DEBUG] Found original author from text: @${match[1]} (retweeter: @${retweeterName})`);
+        return match[1];
+      }
+    }
+  }
+  
+  console.log(`[DEBUG] Could not find original author (retweeter: @${retweeterName})`);
   return null;
 }
 
@@ -269,12 +283,15 @@ function isNotRetweetFromFollowing(tweetElement: HTMLElement): boolean {
   
   // まず、元のツイート主のアカウント名を取得
   const originalAuthor = getOriginalTweetAuthor(tweetElement);
+  console.log(`[DEBUG] Retweet detected, original author: @${originalAuthor || 'unknown'}`);
   
   // 元のツイート主の要素を取得
   const originalAuthorElement = getOriginalTweetAuthorElement(tweetElement);
+  console.log(`[DEBUG] Original author element found: ${originalAuthorElement !== null}`);
   
-  // 元のツイート主の部分だけを探す（リツイートした人の部分は無視）
-  const searchElement = originalAuthorElement || tweetElement;
+  // リツイートした人のアカウント名を取得（除外するため）
+  const retweeterName = getAccountName(tweetElement);
+  console.log(`[DEBUG] Retweeter: @${retweeterName || 'unknown'}`);
   
   // まず「フォロー中」ボタンを探す（フォローしている場合）
   // 元のツイート主の部分だけを探す（リツイートした人の部分は無視）
@@ -291,18 +308,25 @@ function isNotRetweetFromFollowing(tweetElement: HTMLElement): boolean {
   }
   
   // 元のツイート主の要素が見つからない場合、元のツイート主のアカウント名を含む部分だけを探す
+  // ただし、リツイートした人のアカウント名を含む部分は除外
   if (!followingButton && originalAuthor) {
     const allButtons = Array.from(tweetElement.querySelectorAll('button, div[role="button"], span[role="button"], a[role="button"]'));
-    // 元のツイート主のアカウント名を含むセクション内のボタンのみを探す
     followingButton = allButtons.find(btn => {
       // ボタンの近くに元のツイート主のアカウント名があるか確認
+      // ただし、リツイートした人のアカウント名を含む部分は除外
       let parent = btn.parentElement;
       let depth = 0;
-      while (parent && depth < 3) {
-        if (parent.textContent && parent.textContent.includes(`@${originalAuthor}`)) {
+      while (parent && depth < 5) {
+        const text = parent.textContent || '';
+        // リツイートした人のアカウント名を含む場合はスキップ
+        if (retweeterName && text.includes(`@${retweeterName}`) && !text.includes(`@${originalAuthor}`)) {
+          return false;
+        }
+        // 元のツイート主のアカウント名を含む場合のみチェック
+        if (text.includes(`@${originalAuthor}`)) {
           const label = btn.getAttribute('aria-label') || '';
-          const text = btn.textContent || '';
-          return /フォロー中|Following/i.test(label) || /フォロー中|Following/i.test(text);
+          const btnText = btn.textContent || '';
+          return /フォロー中|Following/i.test(label) || /フォロー中|Following/i.test(btnText);
         }
         parent = parent.parentElement;
         depth++;
@@ -338,21 +362,28 @@ function isNotRetweetFromFollowing(tweetElement: HTMLElement): boolean {
   }
   
   // 元のツイート主の要素が見つからない場合、元のツイート主のアカウント名を含む部分だけを探す
+  // ただし、リツイートした人のアカウント名を含む部分は除外
   if (!followButton && originalAuthor) {
     const allButtons = Array.from(tweetElement.querySelectorAll('button, div[role="button"], span[role="button"], a[role="button"]'));
-    // 元のツイート主のアカウント名を含むセクション内のボタンのみを探す
     const followBtn = allButtons.find(btn => {
       // ボタンの近くに元のツイート主のアカウント名があるか確認
+      // ただし、リツイートした人のアカウント名を含む部分は除外
       let parent = btn.parentElement;
       let depth = 0;
-      while (parent && depth < 3) {
-        if (parent.textContent && parent.textContent.includes(`@${originalAuthor}`)) {
+      while (parent && depth < 5) {
+        const text = parent.textContent || '';
+        // リツイートした人のアカウント名を含む場合はスキップ
+        if (retweeterName && text.includes(`@${retweeterName}`) && !text.includes(`@${originalAuthor}`)) {
+          return false;
+        }
+        // 元のツイート主のアカウント名を含む場合のみチェック
+        if (text.includes(`@${originalAuthor}`)) {
           const label = btn.getAttribute('aria-label') || '';
-          const text = btn.textContent || '';
+          const btnText = btn.textContent || '';
           const hasFollowLabel = /フォロー|Follow/i.test(label);
           const hasFollowingLabel = /フォロー中|Following/i.test(label);
-          const hasFollowText = /^フォロー$|^Follow$/i.test(text.trim());
-          const hasFollowingText = /フォロー中|Following/i.test(text);
+          const hasFollowText = /^フォロー$|^Follow$/i.test(btnText.trim());
+          const hasFollowingText = /フォロー中|Following/i.test(btnText);
           
           return (hasFollowLabel && !hasFollowingLabel) || (hasFollowText && !hasFollowingText);
         }
@@ -366,19 +397,17 @@ function isNotRetweetFromFollowing(tweetElement: HTMLElement): boolean {
   }
   
   // ボタンが見つからない場合、デフォルトで「フォローしていない」と判定
-  // （リツイートの場合、フォローしていないアカウントからのリツイートが多いため）
-  const isNotFromFollowing = followButton !== null;
-  
-  // ボタンが見つからない場合は、より積極的に「フォローしていない」と判定
   // リツイートの場合、元のツイート主の部分を正確に特定するのが難しいため、
   // 「フォロー中」ボタンが明確に見つかった場合のみ「フォローしている」と判定
+  // それ以外は「フォローしていない」と判定する（より積極的に）
+  const isNotFromFollowing = followButton !== null;
   const defaultToNotFollowing = followButton === null && followingButton === null;
-  
-  const result = isNotFromFollowing || defaultToNotFollowing;
-  console.log(`[DEBUG] Retweet from @${originalAuthor || 'unknown'}: Not from following = ${result} (hasFollowButton: ${isNotFromFollowing}, defaultToNotFollowing: ${defaultToNotFollowing})`);
   
   // リツイートの場合、安全のため「フォローしていない」と判定する
   // 「フォロー中」ボタンが明確に見つかった場合のみ例外
+  const result = isNotFromFollowing || defaultToNotFollowing;
+  console.log(`[DEBUG] Retweet from @${originalAuthor || 'unknown'}: Not from following = ${result} (hasFollowButton: ${isNotFromFollowing}, defaultToNotFollowing: ${defaultToNotFollowing}, followingButton: ${followingButton !== null})`);
+  
   return result;
 }
 
