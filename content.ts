@@ -186,6 +186,47 @@ function muteAccount(tweetElement: HTMLElement): void {
   }, 300);
 }
 
+// 「このポストは関連性がありません」ボタンをクリック
+function clickRelevanceButton(tweetElement: HTMLElement, accountName: string | null): Promise<void> {
+  return new Promise((resolve) => {
+    let attempts = 0;
+    const maxAttempts = 20; // 最大2秒待つ（100ms × 20）
+    
+    const checkButton = () => {
+      // 「このポストは関連性がありません」または「This post is not relevant」ボタンを探す
+      const buttons = Array.from(document.querySelectorAll('button, div[role="button"], span[role="button"]')) as HTMLElement[];
+      const relevanceButton = buttons.find(btn => {
+        const text = btn.textContent || '';
+        const ariaLabel = btn.getAttribute('aria-label') || '';
+        return text.includes('関連性がありません') || 
+               text.includes('not relevant') ||
+               text.includes('Not relevant') ||
+               ariaLabel.includes('関連性がありません') ||
+               ariaLabel.includes('not relevant') ||
+               ariaLabel.includes('Not relevant');
+      });
+      
+      if (relevanceButton) {
+        console.log(`[DEBUG] Found relevance button for @${accountName || 'unknown'}, clicking...`);
+        relevanceButton.click();
+        setTimeout(() => resolve(), 200);
+        return;
+      }
+      
+      if (attempts >= maxAttempts) {
+        console.log(`[DEBUG] Relevance button not found for @${accountName || 'unknown'} after ${attempts} attempts`);
+        resolve(); // ボタンが見つからなくても続行
+        return;
+      }
+      
+      attempts++;
+      setTimeout(checkButton, 100);
+    };
+    
+    setTimeout(checkButton, 100);
+  });
+}
+
 // メニューを閉じる（Moreボタンを再度クリックするか、メニューの外側をクリック）
 function closeMenu(moreButton?: HTMLElement | null): void {
   // 方法1: Moreボタンを再度クリック（メニューを開いたボタンを再度クリックすると閉じる）
@@ -309,7 +350,11 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
             console.log(`[DEBUG] Found "Not interested" menu item, clicking...`);
             notInterestedItem.click();
             logDismissedTweet(accountName, reason);
-            setTimeout(() => resolve(true), 300); // 非表示にした
+            
+            // 「このポストは関連性がありません」ボタンが表示されるまで待ってクリック
+            clickRelevanceButton(tweetElement, accountName).then(() => {
+              setTimeout(() => resolve(true), 300); // 非表示にした
+            });
             return;
           } else {
             console.warn(`[DEBUG] "Not interested" menu item not found`);
