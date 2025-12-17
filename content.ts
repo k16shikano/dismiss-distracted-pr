@@ -240,11 +240,7 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
           console.log(`[DEBUG] Menu item text: "${unfollowItem.innerText?.substring(0, 50)}"`);
           // メニューを閉じる（Moreボタンを再度クリック）
           closeMenu(moreBtn as HTMLElement);
-          // フォローしているので再表示
-          setTimeout(() => {
-            showTweet(tweetElement);
-            resolve(false); // フォローしている → 表示
-          }, 300);
+          setTimeout(() => resolve(false), 300); // フォローしている → 表示
           return;
         }
         
@@ -286,11 +282,7 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
         console.log(`[DEBUG] @${accountName || 'unknown'}: No follow/unfollow menu items found`);
         // メニューを閉じる
         closeMenu(moreBtn as HTMLElement);
-        // デフォルトで「フォローしている」と判定して再表示
-        setTimeout(() => {
-          showTweet(tweetElement);
-          resolve(false); // デフォルトで「フォローしている」と判定（表示する）
-        }, 300);
+        setTimeout(() => resolve(false), 300); // デフォルトで「フォローしている」と判定（表示する）
       } else {
         attempts++;
         setTimeout(checkMenu, 100);
@@ -532,12 +524,7 @@ function showTweet(tweetEl: HTMLElement): void {
 
 // 複数のツイートを並列で処理
 async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
-  // まず、すべてのツイートを一時的に非表示にする（描画前に処理）
-  for (const tweetEl of tweets) {
-    if (!processedTweets.has(tweetEl)) {
-      hideTweet(tweetEl);
-    }
-  }
+  // 非表示処理は削除（描画を阻害しない）
   
   const promises: Promise<void>[] = [];
   
@@ -579,8 +566,6 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
         processMenuQueue();
       } catch (error) {
         console.error('Error processing tweet:', error);
-        // エラーが発生した場合は再表示
-        showTweet(tweetEl);
       }
     })();
     
@@ -595,75 +580,40 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   
-  // フィルタリング結果に基づいて、表示すべきツイートを再表示
-  for (const tweetEl of tweets) {
-    if (hiddenTweets.has(tweetEl) && !processedTweets.has(tweetEl)) {
-      // 処理済みでない（表示すべき）ツイートを再表示
-      showTweet(tweetEl);
-    }
-  }
+  // 非表示処理を削除したため、再表示処理も不要
   
   console.log(`[DEBUG] Finished processing ${tweets.length} tweets`);
   isProcessing = false;
   closePremiumPlusModal();
 }
 
-// MutationObserverで動的追加にも対応（描画更新を即座に検出して処理）
+// MutationObserverで動的追加にも対応（描画更新を検出して処理）
 const observer = new MutationObserver((mutations) => {
-  // 追加されたarticle要素を即座に検出して処理
-  const newTweets: HTMLElement[] = [];
-  
+  // article要素が追加された瞬間を検出
+  let hasNewTweets = false;
   for (const mutation of mutations) {
     if (mutation.type === 'childList') {
       for (const node of Array.from(mutation.addedNodes)) {
         if (node.nodeType === Node.ELEMENT_NODE) {
           const element = node as HTMLElement;
-          
-          // article要素が直接追加された場合
-          if (element.tagName === 'ARTICLE') {
-            if (!processedTweets.has(element) && !hiddenTweets.has(element)) {
-              newTweets.push(element);
-            }
-          }
-          // article要素を含む要素が追加された場合
-          else {
-            const articles = element.querySelectorAll('article');
-            for (const article of Array.from(articles)) {
-              const articleEl = article as HTMLElement;
-              if (!processedTweets.has(articleEl) && !hiddenTweets.has(articleEl)) {
-                newTweets.push(articleEl);
-              }
-            }
+          // article要素またはarticle要素を含む要素が追加された
+          if (element.tagName === 'ARTICLE' || element.querySelector('article')) {
+            hasNewTweets = true;
+            break;
           }
         }
       }
     }
+    if (hasNewTweets) break;
   }
   
-  // 新しいツイートが見つかった場合、即座に処理
-  if (newTweets.length > 0) {
-    console.log(`[DEBUG] Detected ${newTweets.length} new tweets, processing immediately`);
-    
-    // 即座に非表示にして処理開始
-    for (const tweetEl of newTweets) {
-      hideTweet(tweetEl);
-    }
-    
-    // 処理を開始（既に処理中の場合はキューに追加）
-    if (!isProcessing) {
-      processTweetsInParallel(newTweets);
-    } else {
-      // 既に処理中の場合は、次のスキャンで処理される
-      // ただし、新しいツイートは既に非表示になっている
-    }
-  }
-  
-  // 従来のスキャンも実行（既存のツイートもチェック）
-  if (!scrollTimeout) {
+  // 新しいツイートが見つかった場合、処理を開始（非表示はprocessTweetsInParallel内で実行）
+  if (hasNewTweets && !scrollTimeout) {
+    // より早く処理するため、待機時間を短縮
     scrollTimeout = setTimeout(() => {
       scanTweets();
       scrollTimeout = null;
-    }, 100);
+    }, 50);
   }
 });
 
