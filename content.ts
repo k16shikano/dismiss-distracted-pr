@@ -199,7 +199,7 @@ function isNotFollowingAccount(tweetElement: HTMLElement): Promise<boolean> {
           // メニューを閉じる（ESCキーを送信）
           const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
           document.dispatchEvent(escEvent);
-          setTimeout(() => resolve(false), 200); // フォローしている → 表示
+          setTimeout(() => resolve(false), 500); // フォローしている → 表示（メニューが閉じるまで待つ）
           return;
         }
         
@@ -215,7 +215,7 @@ function isNotFollowingAccount(tweetElement: HTMLElement): Promise<boolean> {
           // メニューを閉じる（ESCキーを送信）
           const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
           document.dispatchEvent(escEvent);
-          setTimeout(() => resolve(true), 200); // フォローしていない → 非表示
+          setTimeout(() => resolve(true), 500); // フォローしていない → 非表示（メニューが閉じるまで待つ）
           return;
         }
         
@@ -224,7 +224,7 @@ function isNotFollowingAccount(tweetElement: HTMLElement): Promise<boolean> {
         // メニューを閉じる（ESCキーを送信）
         const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
         document.dispatchEvent(escEvent);
-        setTimeout(() => resolve(false), 200); // デフォルトで「フォローしている」と判定（表示する）
+        setTimeout(() => resolve(false), 500); // デフォルトで「フォローしている」と判定（表示する）（メニューが閉じるまで待つ）
       } else {
         attempts++;
         setTimeout(checkMenu, 100);
@@ -386,32 +386,43 @@ function dismissAsNotInterested(tweetElement: HTMLElement, reason: string): void
   console.log(`[DEBUG] Clicking More button for @${accountName || 'unknown'}`);
   (moreBtn as HTMLElement).click();
 
-  // メニューが表示されるまで少し長めに待つ
-  setTimeout(() => {
+  // メニューが表示されるまで待つ（ポーリングで確認）
+  let attempts = 0;
+  const maxAttempts = 20; // 最大2秒待つ（100ms × 20）
+  
+  const checkMenu = () => {
     const menuItems = Array.from(document.querySelectorAll('[role="menuitem"]')) as HTMLElement[];
-    console.log(`[DEBUG] Found ${menuItems.length} menu items`);
     
-    if (menuItems.length > 0) {
-      console.log(`[DEBUG] Menu items:`, menuItems.map(item => item.innerText?.substring(0, 50)));
-    }
-    
-    const notInterestedItem = menuItems.find(item => {
-      const text = item.innerText || '';
-      return text.includes("興味がない") || 
-             text.includes("Not interested") ||
-             text.includes("Not interested in this") ||
-             text.includes("興味がありません");
-    });
-    
-    if (notInterestedItem) {
-      console.log(`[DEBUG] Found "Not interested" menu item, clicking...`);
-      notInterestedItem.click();
-      logDismissedTweet(accountName, reason);
+    if (menuItems.length > 0 || attempts >= maxAttempts) {
+      console.log(`[DEBUG] Found ${menuItems.length} menu items for @${accountName || 'unknown'} (attempts: ${attempts})`);
+      
+      if (menuItems.length > 0) {
+        console.log(`[DEBUG] Menu items:`, menuItems.map(item => item.innerText?.substring(0, 50)));
+      }
+      
+      const notInterestedItem = menuItems.find(item => {
+        const text = item.innerText || '';
+        return text.includes("興味がない") || 
+               text.includes("Not interested") ||
+               text.includes("Not interested in this") ||
+               text.includes("興味がありません");
+      });
+      
+      if (notInterestedItem) {
+        console.log(`[DEBUG] Found "Not interested" menu item, clicking...`);
+        notInterestedItem.click();
+        logDismissedTweet(accountName, reason);
+      } else {
+        console.warn(`[${new Date().toLocaleTimeString()}] Failed to dismiss @${accountName || 'unknown'}: "Not interested" menu item not found`);
+        console.warn(`[DEBUG] Available menu items:`, menuItems.map(item => item.innerText?.substring(0, 50)));
+      }
     } else {
-      console.warn(`[${new Date().toLocaleTimeString()}] Failed to dismiss @${accountName || 'unknown'}: "Not interested" menu item not found`);
-      console.warn(`[DEBUG] Available menu items:`, menuItems.map(item => item.innerText?.substring(0, 50)));
+      attempts++;
+      setTimeout(checkMenu, 100);
     }
-  }, 500); // 待機時間を延長
+  };
+  
+  setTimeout(checkMenu, 100);
 }
 
 function scanTweets(): void {
