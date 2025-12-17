@@ -438,7 +438,22 @@ const observer = new MutationObserver(() => {
   }
 });
 
-observer.observe(document.body, { childList: true, subtree: true });
+// document.bodyが存在する場合のみobserverを設定
+if (document.body) {
+  observer.observe(document.body, { childList: true, subtree: true });
+  console.log('MutationObserver initialized');
+} else {
+  console.log('document.body not found, waiting...');
+  // document.bodyが存在しない場合、DOMContentLoadedを待つ
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      if (document.body) {
+        observer.observe(document.body, { childList: true, subtree: true });
+        console.log('MutationObserver initialized after DOMContentLoaded');
+      }
+    });
+  }
+}
 
 // スクロールイベントの監視を追加
 window.addEventListener('scroll', () => {
@@ -452,17 +467,23 @@ window.addEventListener('scroll', () => {
 });
 
 // スクリプトが読み込まれたことを明確に示す
-console.log('=== Twitter Ad Filter Extension Loaded ===');
-console.log('Script is running on:', window.location.href);
-console.log('Document ready state:', document.readyState);
-
-// DOMが完全に読み込まれるまで待つ
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM Content Loaded, starting initial scan...');
-    scanTweets();
-  });
-} else {
-  console.log('DOM already loaded, starting initial scan...');
-  scanTweets();
+try {
+  console.log('=== Twitter Ad Filter Extension Loaded ===');
+  console.log('Script is running on:', window.location.href);
+  console.log('Document ready state:', document.readyState);
+  console.log('Document body exists:', document.body !== null);
+  
+  // DOMが完全に読み込まれるまで待つ
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log('DOM Content Loaded, starting initial scan...');
+      setTimeout(() => scanTweets(), 1000);
+    });
+  } else {
+    console.log('DOM already loaded, starting initial scan...');
+    // DOMが完全に読み込まれるまで少し待つ
+    setTimeout(() => scanTweets(), 1000);
+  }
+} catch (error) {
+  console.error('Error initializing extension:', error);
 }
