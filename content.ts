@@ -160,29 +160,102 @@ function muteAccount(tweetElement: HTMLElement): void {
 
 // フォローしていないアカウントかどうかを判定
 function isNotFollowingAccount(tweetElement: HTMLElement): boolean {
-  // 「フォロー」ボタンがあるかどうかで判定
-  const followButton = tweetElement.querySelector('[data-testid="follow"], [aria-label*="フォロー"], [aria-label*="Follow"]');
-  const isNotFollowing = followButton !== null;
-  console.log('Is not following account:', isNotFollowing);
+  // フォローボタンを探す（複数のセレクタで試す）
+  let followButton = tweetElement.querySelector('[data-testid="follow"]');
+  
+  if (!followButton) {
+    // aria-labelで探す
+    const buttons = Array.from(tweetElement.querySelectorAll('button, div[role="button"]'));
+    const foundButton = buttons.find(btn => {
+      const label = btn.getAttribute('aria-label') || '';
+      return /フォロー|Follow/i.test(label) && !/フォロー中|Following/i.test(label);
+    });
+    followButton = foundButton ? foundButton as HTMLElement : null;
+  }
+  
+  // テキスト内容でも確認（ボタン内のテキスト）
+  if (!followButton) {
+    const allButtons = Array.from(tweetElement.querySelectorAll('button, div[role="button"], span[role="button"]'));
+    const foundButton = allButtons.find(btn => {
+      const text = btn.textContent || '';
+      return /^フォロー$|^Follow$/i.test(text.trim());
+    });
+    followButton = foundButton ? foundButton as HTMLElement : null;
+  }
+  
+  const isNotFollowing = followButton !== null && followButton !== undefined;
+  
+  console.log('Checking if not following account:', {
+    hasFollowButton: isNotFollowing,
+    accountName: getAccountName(tweetElement)
+  });
+  
   return isNotFollowing;
+}
+
+// リツイートかどうかを判定
+function isRetweet(tweetElement: HTMLElement): boolean {
+  // リツイートの表示を探す（複数の方法で）
+  let retweetIndicator = tweetElement.querySelector('[data-testid="socialContext"]');
+  
+  if (!retweetIndicator) {
+    retweetIndicator = tweetElement.querySelector('[data-testid="retweet"]');
+  }
+  
+  // テキスト内容でも確認
+  const textContent = tweetElement.innerText || '';
+  const hasRetweetText = /リツイート|Retweeted|retweeted/i.test(textContent);
+  
+  // リツイートアイコンを探す
+  const retweetIcon = tweetElement.querySelector('[data-testid="retweet"]');
+  
+  const isRT = retweetIndicator !== null || retweetIcon !== null || hasRetweetText;
+  
+  console.log('Checking if retweet:', {
+    hasRetweetIndicator: retweetIndicator !== null,
+    hasRetweetIcon: retweetIcon !== null,
+    hasRetweetText: hasRetweetText,
+    isRetweet: isRT
+  });
+  
+  return isRT;
 }
 
 // フォローしている人からのリツイートではないかどうかを判定
 function isNotRetweetFromFollowing(tweetElement: HTMLElement): boolean {
-  // リツイートの表示を探す
-  const retweetIndicator = tweetElement.querySelector('[data-testid="socialContext"], [data-testid="retweet"]');
-  
-  if (!retweetIndicator) {
-    // リツイートではない場合は、フォローしていないアカウントからのツイートとして扱う
-    return isNotFollowingAccount(tweetElement);
+  // リツイートでない場合は、この関数では判定しない（isNotFollowingAccountで判定される）
+  if (!isRetweet(tweetElement)) {
+    return false;
   }
   
-  // リツイートの場合、フォローしている人からのリツイートかどうかを判定
-  // リツイート要素内に「フォロー」ボタンがない場合は、フォローしている人からのリツイート
-  const followButtonInRetweet = retweetIndicator.closest('article')?.querySelector('[data-testid="follow"]');
-  const isFromFollowing = followButtonInRetweet === null;
-  console.log('Is not retweet from following:', !isFromFollowing);
-  return !isFromFollowing;
+  // リツイートの場合、元のツイート主がフォローしているかどうかを判定
+  // リツイート要素内に「フォロー」ボタンがある場合は、フォローしていないアカウントからのリツイート
+  const followButtonInRetweet = tweetElement.querySelector('[data-testid="follow"]');
+  
+  if (!followButtonInRetweet) {
+    // aria-labelでも確認
+    const buttons = Array.from(tweetElement.querySelectorAll('button, div[role="button"]'));
+    const followBtn = buttons.find(btn => {
+      const label = btn.getAttribute('aria-label') || '';
+      return /フォロー|Follow/i.test(label) && !/フォロー中|Following/i.test(label);
+    });
+    
+    const isFromFollowing = followBtn === undefined;
+    console.log('Checking if not retweet from following:', {
+      isRetweet: true,
+      hasFollowButton: followBtn !== undefined,
+      isNotFromFollowing: !isFromFollowing
+    });
+    return !isFromFollowing;
+  }
+  
+  console.log('Checking if not retweet from following:', {
+    isRetweet: true,
+    hasFollowButton: true,
+    isNotFromFollowing: true
+  });
+  
+  return true;
 }
 
 // 「興味がない」メニューをクリック
@@ -221,12 +294,18 @@ function dismissAsNotInterested(tweetElement: HTMLElement): void {
 }
 
 function scanTweets(): void {
-  console.log('Scanning tweets...');
+  console.log('=== scanTweets() called ===');
   const tweetArticles = document.querySelectorAll('article');
-  console.log(`Found ${tweetArticles.length} tweets`);
+  console.log(`Found ${tweetArticles.length} article elements`);
+  
+  if (tweetArticles.length === 0) {
+    console.log('No tweets found, waiting for content to load...');
+    return;
+  }
   
   // 処理済みのツイートを記録
   const processedTweets = new Set<HTMLElement>();
+  let processedCount = 0;
   
   tweetArticles.forEach((article, index) => {
     const tweetEl = article as HTMLElement;
@@ -238,37 +317,54 @@ function scanTweets(): void {
     
     // ビューポート内のツイートのみを処理
     if (isInViewport(tweetEl)) {
-      console.log(`\nAnalyzing tweet ${index + 1} in viewport:`);
+      console.log(`\n=== Analyzing tweet ${index + 1} ===`);
+      const accountName = getAccountName(tweetEl);
+      console.log('Account:', accountName);
       
       // プロモーションツイートの処理
       if (isPromoted(tweetEl)) {
         const text = tweetEl.innerText;
-        console.log('Checking promotion conditions for:', text);
+        console.log('Promoted tweet detected, checking conditions...');
         if (shouldDismiss(text)) {
           console.log('Conditions met, muting account...');
           muteAccount(tweetEl);
-          // 処理済みとしてマーク
           processedTweets.add(tweetEl);
+          processedCount++;
+          return; // プロモーションツイートの処理が完了したら次へ
         } else {
           console.log('Conditions not met, skipping...');
         }
       }
       
-      // フォローしていないアカウントによるツイートを「興味がない」に分類
-      if (isNotFollowingAccount(tweetEl)) {
-        console.log('Not following account, dismissing as not interested...');
-        dismissAsNotInterested(tweetEl);
-        processedTweets.add(tweetEl);
-      }
+      // リツイートかどうかを先に確認
+      const isRT = isRetweet(tweetEl);
+      console.log('Is retweet:', isRT);
       
-      // フォローしている人からのリツイートではないツイートを「興味がない」に分類
-      if (isNotRetweetFromFollowing(tweetEl)) {
-        console.log('Not retweet from following, dismissing as not interested...');
-        dismissAsNotInterested(tweetEl);
-        processedTweets.add(tweetEl);
+      if (isRT) {
+        // リツイートの場合：フォローしている人からのリツイートではない場合のみ「興味がない」に分類
+        if (isNotRetweetFromFollowing(tweetEl)) {
+          console.log('>>> ACTION: Dismissing retweet from non-following account');
+          dismissAsNotInterested(tweetEl);
+          processedTweets.add(tweetEl);
+          processedCount++;
+        } else {
+          console.log('Retweet from following account, keeping it');
+        }
+      } else {
+        // 通常のツイートの場合：フォローしていないアカウントによるツイートを「興味がない」に分類
+        if (isNotFollowingAccount(tweetEl)) {
+          console.log('>>> ACTION: Dismissing tweet from non-following account');
+          dismissAsNotInterested(tweetEl);
+          processedTweets.add(tweetEl);
+          processedCount++;
+        } else {
+          console.log('Tweet from following account, keeping it');
+        }
       }
     }
   });
+  
+  console.log(`=== Scan complete: processed ${processedCount} tweets ===`);
   closePremiumPlusModal();
 }
 
@@ -297,6 +393,18 @@ window.addEventListener('scroll', () => {
   }
 });
 
-// 初回スキャンも
-console.log('Initial scan starting...');
-scanTweets();
+// スクリプトが読み込まれたことを明確に示す
+console.log('=== Twitter Ad Filter Extension Loaded ===');
+console.log('Script is running on:', window.location.href);
+console.log('Document ready state:', document.readyState);
+
+// DOMが完全に読み込まれるまで待つ
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM Content Loaded, starting initial scan...');
+    scanTweets();
+  });
+} else {
+  console.log('DOM already loaded, starting initial scan...');
+  scanTweets();
+}

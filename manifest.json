@@ -6,12 +6,12 @@
   "permissions": [],
   "content_scripts": [
     {
-      "matches": ["*://x.com/*"],
+      "matches": ["*://x.com/*", "*://twitter.com/*"],
       "js": ["dist/content.js"],
       "run_at": "document_idle"
     }
   ],
-  "host_permissions": ["*://x.com/*"],
+  "host_permissions": ["*://x.com/*", "*://twitter.com/*"],
   "action": {
     "default_title": "Twitter Ad Filter"
   }
