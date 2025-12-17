@@ -190,12 +190,12 @@ function isNotFollowingAccount(tweetElement: HTMLElement): boolean {
   // デバッグログ
   if (isNotFollowing) {
     console.log(`[DEBUG] @${accountName || 'unknown'}: Not following (found Follow button)`);
-    return true; // 確実に「フォローしていない」と判定できる場合
+    return true; // 確実に「フォローしていない」と判定できる場合のみ非表示
   } else {
-    // ボタンが見つからない場合、デフォルトで「フォローしていない」と判定
-    // （フォローしていない人のツイートは基本的に非表示にする）
-    console.log(`[DEBUG] @${accountName || 'unknown'}: Not following (no buttons found, defaulting to not following)`);
-    return true; // ボタンが見つからない場合は「フォローしていない」と判定（非表示にする）
+    // ボタンが見つからない場合、安全のため「フォローしている」と判定
+    // （フォローしている人のツイートを誤判定しないようにする）
+    console.log(`[DEBUG] @${accountName || 'unknown'}: Following or unable to determine (keeping tweet to avoid false positives)`);
+    return false; // ボタンが見つからない場合は「フォローしている」と判定（非表示にしない）
   }
 }
 
