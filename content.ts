@@ -405,106 +405,116 @@ function dismissAsNotInterested(tweetElement: HTMLElement, reason: string): void
 }
 
 function scanTweets(): void {
-  // 既に処理中の場合はスキップ
-  if (isProcessing) {
-    return;
-  }
-  
-  const tweetArticles = document.querySelectorAll('article');
-  
-  if (tweetArticles.length === 0) {
-    return;
-  }
-  
-  // 処理対象のツイートを収集（処理済みでない、ビューポート内のもの）
-  const tweetsToProcess: HTMLElement[] = [];
-  
-  tweetArticles.forEach((article) => {
-    const tweetEl = article as HTMLElement;
-    
-    // すでに処理済みのツイートはスキップ
-    if (processedTweets.has(tweetEl)) {
+  try {
+    // 既に処理中の場合はスキップ
+    if (isProcessing) {
       return;
     }
     
-    // ビューポート内のツイートのみを処理対象に追加
-    if (isInViewport(tweetEl)) {
-      tweetsToProcess.push(tweetEl);
+    const tweetArticles = document.querySelectorAll('article');
+    
+    if (tweetArticles.length === 0) {
+      return;
     }
-  });
-  
-  if (tweetsToProcess.length === 0) {
-    closePremiumPlusModal();
-    return;
+    
+    // 処理対象のツイートを収集（処理済みでない、ビューポート内のもの）
+    const tweetsToProcess: HTMLElement[] = [];
+    
+    tweetArticles.forEach((article) => {
+      const tweetEl = article as HTMLElement;
+      
+      // すでに処理済みのツイートはスキップ
+      if (processedTweets.has(tweetEl)) {
+        return;
+      }
+      
+      // ビューポート内のツイートのみを処理対象に追加
+      if (isInViewport(tweetEl)) {
+        tweetsToProcess.push(tweetEl);
+      }
+    });
+    
+    if (tweetsToProcess.length === 0) {
+      closePremiumPlusModal();
+      return;
+    }
+    
+    // 処理開始
+    isProcessing = true;
+    
+    // 最初のツイートを処理
+    processNextTweet(tweetsToProcess, 0);
+  } catch (error) {
+    console.error('Error in scanTweets:', error);
+    isProcessing = false;
   }
-  
-  // 処理開始
-  isProcessing = true;
-  
-  // 最初のツイートを処理
-  processNextTweet(tweetsToProcess, 0);
 }
 
 function processNextTweet(tweets: HTMLElement[], index: number): void {
-  if (index >= tweets.length) {
-    isProcessing = false;
-    closePremiumPlusModal();
-    return;
-  }
-  
-  const tweetEl = tweets[index];
-  
-  // プロモーションツイートの処理
-  const isPromo = isPromoted(tweetEl);
-  let shouldSkip = false;
-  
-  if (isPromo) {
-    const text = tweetEl.innerText;
-    if (shouldDismiss(text)) {
-      muteAccount(tweetEl);
-      processedTweets.add(tweetEl);
-      shouldSkip = true;
-      // ミュート処理は非同期なので、少し待ってから次へ
-      setTimeout(() => {
-        processNextTweet(tweets, index + 1);
-      }, 2000);
+  try {
+    if (index >= tweets.length) {
+      isProcessing = false;
+      closePremiumPlusModal();
       return;
     }
-  }
-  
-  // プロモーションツイートでない場合、またはプロモーションツイートでも条件を満たさない場合、フォロー/リツイート判定を実行
-  if (!shouldSkip) {
-    // リツイートかどうかを先に確認
-    const isRT = isRetweet(tweetEl);
     
-    if (isRT) {
-      // リツイートの場合：フォローしている人からのリツイートではない場合のみ「興味がない」に分類
-      if (isNotRetweetFromFollowing(tweetEl)) {
-        dismissAsNotInterested(tweetEl, "リツイート（フォローしていないアカウント）");
+    const tweetEl = tweets[index];
+    
+    // プロモーションツイートの処理
+    const isPromo = isPromoted(tweetEl);
+    let shouldSkip = false;
+    
+    if (isPromo) {
+      const text = tweetEl.innerText;
+      if (shouldDismiss(text)) {
+        muteAccount(tweetEl);
         processedTweets.add(tweetEl);
-        // 非同期処理なので、少し待ってから次へ
+        shouldSkip = true;
+        // ミュート処理は非同期なので、少し待ってから次へ
         setTimeout(() => {
           processNextTweet(tweets, index + 1);
-        }, 1500);
-        return;
-      }
-    } else {
-      // 通常のツイートの場合：フォローしていないアカウントによるツイートを「興味がない」に分類
-      if (isNotFollowingAccount(tweetEl)) {
-        dismissAsNotInterested(tweetEl, "フォローしていないアカウント");
-        processedTweets.add(tweetEl);
-        // 非同期処理なので、少し待ってから次へ
-        setTimeout(() => {
-          processNextTweet(tweets, index + 1);
-        }, 1500);
+        }, 2000);
         return;
       }
     }
+    
+    // プロモーションツイートでない場合、またはプロモーションツイートでも条件を満たさない場合、フォロー/リツイート判定を実行
+    if (!shouldSkip) {
+      // リツイートかどうかを先に確認
+      const isRT = isRetweet(tweetEl);
+      
+      if (isRT) {
+        // リツイートの場合：フォローしている人からのリツイートではない場合のみ「興味がない」に分類
+        if (isNotRetweetFromFollowing(tweetEl)) {
+          dismissAsNotInterested(tweetEl, "リツイート（フォローしていないアカウント）");
+          processedTweets.add(tweetEl);
+          // 非同期処理なので、少し待ってから次へ
+          setTimeout(() => {
+            processNextTweet(tweets, index + 1);
+          }, 1500);
+          return;
+        }
+      } else {
+        // 通常のツイートの場合：フォローしていないアカウントによるツイートを「興味がない」に分類
+        if (isNotFollowingAccount(tweetEl)) {
+          dismissAsNotInterested(tweetEl, "フォローしていないアカウント");
+          processedTweets.add(tweetEl);
+          // 非同期処理なので、少し待ってから次へ
+          setTimeout(() => {
+            processNextTweet(tweets, index + 1);
+          }, 1500);
+          return;
+        }
+      }
+    }
+    
+    // 処理が不要な場合、すぐに次へ
+    processedTweets.add(tweetEl);
+    processNextTweet(tweets, index + 1);
+  } catch (error) {
+    console.error('Error in processNextTweet:', error);
+    isProcessing = false;
   }
-  
-  // 処理が不要な場合、すぐに次へ
-  processedTweets.add(tweetEl);
-  processNextTweet(tweets, index + 1);
 }
 
 // MutationObserverで動的追加にも対応
@@ -545,11 +555,24 @@ try {
   console.log('Twitter Ad Filter Extension: Initialized');
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-      setTimeout(() => scanTweets(), 1000);
+      try {
+        setTimeout(() => scanTweets(), 1000);
+      } catch (error) {
+        console.error('Error in DOMContentLoaded handler:', error);
+      }
     });
   } else {
-    setTimeout(() => scanTweets(), 1000);
+    try {
+      setTimeout(() => scanTweets(), 1000);
+    } catch (error) {
+      console.error('Error in initial scanTweets:', error);
+    }
   }
 } catch (error) {
   console.error('Error initializing extension:', error);
+  console.error('Error details:', {
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined
+  });
 }
+
