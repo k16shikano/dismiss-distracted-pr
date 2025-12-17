@@ -1,6 +1,12 @@
 // スクロールタイムアウトの管理用変数
 let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 
+// 処理済みのツイートを記録（グローバル）
+const processedTweets = new Set<HTMLElement>();
+
+// 処理中フラグ（同時に複数のツイートを処理しないようにする）
+let isProcessing = false;
+
 function isInViewport(element: HTMLElement): boolean {
   const rect = element.getBoundingClientRect();
   return (
@@ -295,6 +301,13 @@ function dismissAsNotInterested(tweetElement: HTMLElement): void {
 
 function scanTweets(): void {
   console.log('=== scanTweets() called ===');
+  
+  // 既に処理中の場合はスキップ
+  if (isProcessing) {
+    console.log('Already processing, skipping this scan...');
+    return;
+  }
+  
   const tweetArticles = document.querySelectorAll('article');
   console.log(`Found ${tweetArticles.length} article elements`);
   
@@ -303,9 +316,8 @@ function scanTweets(): void {
     return;
   }
   
-  // 処理済みのツイートを記録
-  const processedTweets = new Set<HTMLElement>();
-  let processedCount = 0;
+  // 処理対象のツイートを収集（処理済みでない、ビューポート内のもの）
+  const tweetsToProcess: HTMLElement[] = [];
   
   tweetArticles.forEach((article, index) => {
     const tweetEl = article as HTMLElement;
@@ -315,64 +327,103 @@ function scanTweets(): void {
       return;
     }
     
-      // ビューポート内のツイートのみを処理
-      if (isInViewport(tweetEl)) {
-        console.log(`\n=== Analyzing tweet ${index + 1} ===`);
-        const accountName = getAccountName(tweetEl);
-        console.log('Account:', accountName);
-        
-        // プロモーションツイートの処理
-        const isPromo = isPromoted(tweetEl);
-        let shouldSkip = false;
-        
-        if (isPromo) {
-          const text = tweetEl.innerText;
-          console.log('Promoted tweet detected, checking conditions...');
-          if (shouldDismiss(text)) {
-            console.log('Conditions met, muting account...');
-            muteAccount(tweetEl);
-            processedTweets.add(tweetEl);
-            processedCount++;
-            shouldSkip = true; // プロモーションツイートの処理が完了したら次へ
-          } else {
-            console.log('Conditions not met, skipping...');
-          }
-        }
-        
-        // プロモーションツイートでない場合、またはプロモーションツイートでも条件を満たさない場合、フォロー/リツイート判定を実行
-        if (!shouldSkip) {
-          // リツイートかどうかを先に確認
-          const isRT = isRetweet(tweetEl);
-          console.log('Is retweet:', isRT);
-          
-          if (isRT) {
-            // リツイートの場合：フォローしている人からのリツイートではない場合のみ「興味がない」に分類
-            if (isNotRetweetFromFollowing(tweetEl)) {
-              console.log('>>> ACTION: Dismissing retweet from non-following account');
-              dismissAsNotInterested(tweetEl);
-              processedTweets.add(tweetEl);
-              processedCount++;
-            } else {
-              console.log('Retweet from following account, keeping it');
-            }
-          } else {
-            // 通常のツイートの場合：フォローしていないアカウントによるツイートを「興味がない」に分類
-            console.log('Checking if not following account...');
-            if (isNotFollowingAccount(tweetEl)) {
-              console.log('>>> ACTION: Dismissing tweet from non-following account');
-              dismissAsNotInterested(tweetEl);
-              processedTweets.add(tweetEl);
-              processedCount++;
-            } else {
-              console.log('Tweet from following account, keeping it');
-            }
-          }
-        }
-      }
+    // ビューポート内のツイートのみを処理対象に追加
+    if (isInViewport(tweetEl)) {
+      tweetsToProcess.push(tweetEl);
+    }
   });
   
-  console.log(`=== Scan complete: processed ${processedCount} tweets ===`);
-  closePremiumPlusModal();
+  console.log(`Found ${tweetsToProcess.length} tweets to process`);
+  
+  if (tweetsToProcess.length === 0) {
+    console.log('No new tweets to process');
+    closePremiumPlusModal();
+    return;
+  }
+  
+  // 処理開始
+  isProcessing = true;
+  
+  // 最初のツイートを処理
+  processNextTweet(tweetsToProcess, 0);
+}
+
+function processNextTweet(tweets: HTMLElement[], index: number): void {
+  if (index >= tweets.length) {
+    console.log(`=== All ${tweets.length} tweets processed ===`);
+    isProcessing = false;
+    closePremiumPlusModal();
+    return;
+  }
+  
+  const tweetEl = tweets[index];
+  console.log(`\n=== Processing tweet ${index + 1}/${tweets.length} ===`);
+  const accountName = getAccountName(tweetEl);
+  console.log('Account:', accountName);
+  
+  // プロモーションツイートの処理
+  const isPromo = isPromoted(tweetEl);
+  let shouldSkip = false;
+  
+  if (isPromo) {
+    const text = tweetEl.innerText;
+    console.log('Promoted tweet detected, checking conditions...');
+    if (shouldDismiss(text)) {
+      console.log('Conditions met, muting account...');
+      muteAccount(tweetEl);
+      processedTweets.add(tweetEl);
+      shouldSkip = true;
+      // ミュート処理は非同期なので、少し待ってから次へ
+      setTimeout(() => {
+        processNextTweet(tweets, index + 1);
+      }, 2000);
+      return;
+    } else {
+      console.log('Conditions not met, skipping...');
+    }
+  }
+  
+  // プロモーションツイートでない場合、またはプロモーションツイートでも条件を満たさない場合、フォロー/リツイート判定を実行
+  if (!shouldSkip) {
+    // リツイートかどうかを先に確認
+    const isRT = isRetweet(tweetEl);
+    console.log('Is retweet:', isRT);
+    
+    if (isRT) {
+      // リツイートの場合：フォローしている人からのリツイートではない場合のみ「興味がない」に分類
+      if (isNotRetweetFromFollowing(tweetEl)) {
+        console.log('>>> ACTION: Dismissing retweet from non-following account');
+        dismissAsNotInterested(tweetEl);
+        processedTweets.add(tweetEl);
+        // 非同期処理なので、少し待ってから次へ
+        setTimeout(() => {
+          processNextTweet(tweets, index + 1);
+        }, 1500);
+        return;
+      } else {
+        console.log('Retweet from following account, keeping it');
+      }
+    } else {
+      // 通常のツイートの場合：フォローしていないアカウントによるツイートを「興味がない」に分類
+      console.log('Checking if not following account...');
+      if (isNotFollowingAccount(tweetEl)) {
+        console.log('>>> ACTION: Dismissing tweet from non-following account');
+        dismissAsNotInterested(tweetEl);
+        processedTweets.add(tweetEl);
+        // 非同期処理なので、少し待ってから次へ
+        setTimeout(() => {
+          processNextTweet(tweets, index + 1);
+        }, 1500);
+        return;
+      } else {
+        console.log('Tweet from following account, keeping it');
+      }
+    }
+  }
+  
+  // 処理が不要な場合、すぐに次へ
+  processedTweets.add(tweetEl);
+  processNextTweet(tweets, index + 1);
 }
 
 // MutationObserverで動的追加にも対応
