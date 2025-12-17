@@ -7,6 +7,48 @@ const processedTweets = new Set<HTMLElement>();
 // 処理中フラグ（同時に複数のツイートを処理しないようにする）
 let isProcessing = false;
 
+// 「おすすめ」タブが選択されているかどうかを判定
+function isRecommendedTab(): boolean {
+  // URLで判定（ホーム画面でない場合はfalse）
+  const url = window.location.href;
+  const isHomePage = url.includes('/home') || /^https?:\/\/(x\.com|twitter\.com)\/?$/.test(url);
+  if (!isHomePage) {
+    return false;
+  }
+  
+  // タブ要素を探す
+  // 「おすすめ」タブは通常、aria-selected="true"またはdata-testidで識別できる
+  const tabs = document.querySelectorAll('[role="tab"]');
+  for (const tab of Array.from(tabs)) {
+    const text = tab.textContent || '';
+    const ariaLabel = tab.getAttribute('aria-label') || '';
+    const isSelected = tab.getAttribute('aria-selected') === 'true';
+    
+    // 「おすすめ」または「For you」タブが選択されているか確認
+    if ((text.includes('おすすめ') || text.includes('For you') || 
+         ariaLabel.includes('おすすめ') || ariaLabel.includes('For you')) && isSelected) {
+      return true;
+    }
+  }
+  
+  // タブが見つからない場合、デフォルトで「おすすめ」と判定（ホーム画面の場合）
+  // ただし、明示的に「フォロー中」タブが選択されている場合はfalse
+  const followingTab = Array.from(tabs).find(tab => {
+    const text = tab.textContent || '';
+    const ariaLabel = tab.getAttribute('aria-label') || '';
+    return (text.includes('フォロー中') || text.includes('Following') ||
+            ariaLabel.includes('フォロー中') || ariaLabel.includes('Following')) &&
+           tab.getAttribute('aria-selected') === 'true';
+  });
+  
+  if (followingTab) {
+    return false; // 「フォロー中」タブが選択されている
+  }
+  
+  // ホーム画面で、タブが見つからない場合は「おすすめ」と判定
+  return url.includes('/home') || /^https?:\/\/(x\.com|twitter\.com)\/?$/.test(url);
+}
+
 // 一時的に非表示にしたツイート（フィルタリング中）
 const hiddenTweets = new Map<HTMLElement, { display: string; visibility: string }>();
 
@@ -410,6 +452,11 @@ async function checkAndDismissRetweet(tweetElement: HTMLElement, reason: string)
 
 function scanTweets(): void {
   try {
+    // 「おすすめ」タブでない場合は処理しない
+    if (!isRecommendedTab()) {
+      return;
+    }
+    
     // 既に処理中の場合はスキップ
     if (isProcessing) {
       console.log('[DEBUG] Already processing, skipping scan');
@@ -589,6 +636,11 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
 
 // MutationObserverで動的追加にも対応（描画更新を検出して処理）
 const observer = new MutationObserver((mutations) => {
+  // 「おすすめ」タブでない場合は処理しない
+  if (!isRecommendedTab()) {
+    return;
+  }
+  
   // article要素が追加された瞬間を検出
   let hasNewTweets = false;
   for (const mutation of mutations) {
@@ -632,6 +684,11 @@ if (document.body) {
 
 // スクロールイベントの監視を追加
 window.addEventListener('scroll', () => {
+  // 「おすすめ」タブでない場合は処理しない
+  if (!isRecommendedTab()) {
+    return;
+  }
+  
   if (!scrollTimeout) {
     scrollTimeout = setTimeout(() => {
       scanTweets();
