@@ -141,6 +141,34 @@ function muteAccount(tweetElement: HTMLElement): void {
   }, 300);
 }
 
+// メニューを閉じる（複数の方法を試す）
+function closeMenu(): void {
+  // 方法1: ESCキーを送信
+  const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true, cancelable: true });
+  document.dispatchEvent(escEvent);
+  
+  // 方法2: メニューの外側をクリック
+  setTimeout(() => {
+    // メニュー要素を探す
+    const menu = document.querySelector('[role="menu"]');
+    if (menu) {
+      // メニューの外側（body）をクリック
+      const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
+      document.body.dispatchEvent(clickEvent);
+    } else {
+      // メニューが見つからない場合、画面の左上をクリック
+      const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 0, clientY: 0 });
+      document.body.dispatchEvent(clickEvent);
+    }
+  }, 50);
+  
+  // 方法3: もう一度ESCキーを送信（念のため）
+  setTimeout(() => {
+    const escEvent2 = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true, cancelable: true });
+    document.dispatchEvent(escEvent2);
+  }, 100);
+}
+
 // メニューを開いて、フォロー状態を判定し、必要に応じて非表示にする
 function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promise<boolean> {
   return new Promise((resolve) => {
@@ -196,10 +224,9 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
         if (unfollowItem) {
           console.log(`[DEBUG] @${accountName || 'unknown'}: Following (found "Unfollow" menu item)`);
           console.log(`[DEBUG] Menu item text: "${unfollowItem.innerText?.substring(0, 50)}"`);
-          // メニューを閉じる（ESCキーを送信）
-          const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
-          document.dispatchEvent(escEvent);
-          setTimeout(() => resolve(false), 300); // フォローしている → 表示
+          // メニューを閉じる（複数の方法を試す）
+          closeMenu();
+          setTimeout(() => resolve(false), 500); // フォローしている → 表示
           return;
         }
         
@@ -231,19 +258,17 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
           } else {
             console.warn(`[DEBUG] "Not interested" menu item not found`);
             // メニューを閉じる
-            const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
-            document.dispatchEvent(escEvent);
-            setTimeout(() => resolve(true), 300); // フォローしていないが、メニュー項目が見つからなかった
+            closeMenu();
+            setTimeout(() => resolve(true), 500); // フォローしていないが、メニュー項目が見つからなかった
             return;
           }
         }
         
         // メニュー項目が見つからない場合
         console.log(`[DEBUG] @${accountName || 'unknown'}: No follow/unfollow menu items found`);
-        // メニューを閉じる（ESCキーを送信）
-        const escEvent = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true });
-        document.dispatchEvent(escEvent);
-        setTimeout(() => resolve(false), 300); // デフォルトで「フォローしている」と判定（表示する）
+        // メニューを閉じる
+        closeMenu();
+        setTimeout(() => resolve(false), 500); // デフォルトで「フォローしている」と判定（表示する）
       } else {
         attempts++;
         setTimeout(checkMenu, 100);
