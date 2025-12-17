@@ -148,80 +148,44 @@ function isNotFollowingAccount(tweetElement: HTMLElement): boolean {
   
   // すべてのボタンを取得
   const allButtons = Array.from(tweetElement.querySelectorAll('button, div[role="button"], span[role="button"], a[role="button"]'));
-  console.log(`[DEBUG] Found ${allButtons.length} buttons in tweet`);
   
-  // 「フォロー中」ボタンを探す（フォローしている場合）
-  let followingButton: HTMLElement | null = null;
+  // ボタンのテキスト内容で判定
+  // 「Xさんのフォローを解除」→ フォローしている
+  // 「Xさんをフォロー」→ フォローしていない
   
-  // data-testidで探す
-  followingButton = tweetElement.querySelector('[data-testid*="unfollow"]') as HTMLElement | null;
+  // まず「フォローを解除」ボタンを探す（フォローしている場合）
+  const unfollowButton = allButtons.find(btn => {
+    const text = btn.textContent || '';
+    const label = btn.getAttribute('aria-label') || '';
+    // 「フォローを解除」または「Unfollow」を含む
+    return /フォローを解除|Unfollow/i.test(text) || /フォローを解除|Unfollow/i.test(label);
+  });
   
-  if (!followingButton) {
-    // aria-labelで探す
-    followingButton = allButtons.find(btn => {
-      const label = btn.getAttribute('aria-label') || '';
-      return /フォロー中|Following/i.test(label);
-    }) as HTMLElement | null;
+  if (unfollowButton) {
+    console.log(`[DEBUG] @${accountName || 'unknown'}: Following (found "Unfollow" button)`);
+    console.log(`[DEBUG] Button text: "${unfollowButton.textContent?.substring(0, 50)}"`);
+    return false; // フォローしている → 表示
   }
   
-  if (!followingButton) {
-    // テキスト内容で探す
-    followingButton = allButtons.find(btn => {
-      const text = btn.textContent || '';
-      return /フォロー中|Following/i.test(text);
-    }) as HTMLElement | null;
-  }
-  
-  if (followingButton) {
-    console.log(`[DEBUG] @${accountName || 'unknown'}: Following (found Following button)`);
-    console.log(`[DEBUG] Following button details:`, {
-      ariaLabel: followingButton.getAttribute('aria-label'),
-      text: followingButton.textContent?.substring(0, 50),
-      dataTestId: followingButton.getAttribute('data-testid')
-    });
-    return false; // フォローしている
-  }
-  
-  // 「フォロー」ボタンを探す（フォローしていない場合）
-  let followButton: HTMLElement | null = null;
-  
-  // data-testidで探す
-  followButton = tweetElement.querySelector('[data-testid="follow"]') as HTMLElement | null;
-  
-  if (!followButton) {
-    // aria-labelで探す（「フォロー」を含むが「フォロー中」を含まない）
-    followButton = allButtons.find(btn => {
-      const label = btn.getAttribute('aria-label') || '';
-      return /フォロー|Follow/i.test(label) && !/フォロー中|Following/i.test(label);
-    }) as HTMLElement | null;
-  }
-  
-  if (!followButton) {
-    // テキスト内容で探す（「フォロー」または「Follow」のみ）
-    followButton = allButtons.find(btn => {
-      const text = btn.textContent?.trim() || '';
-      return (/^フォロー$|^Follow$/i.test(text)) && !/フォロー中|Following/i.test(text);
-    }) as HTMLElement | null;
-  }
+  // 次に「フォロー」ボタンを探す（フォローしていない場合）
+  const followButton = allButtons.find(btn => {
+    const text = btn.textContent || '';
+    const label = btn.getAttribute('aria-label') || '';
+    // 「フォロー」または「Follow」を含むが、「フォローを解除」を含まない
+    const hasFollow = /フォロー|Follow/i.test(text) || /フォロー|Follow/i.test(label);
+    const hasUnfollow = /フォローを解除|Unfollow/i.test(text) || /フォローを解除|Unfollow/i.test(label);
+    return hasFollow && !hasUnfollow;
+  });
   
   if (followButton) {
-    console.log(`[DEBUG] @${accountName || 'unknown'}: Not following (found Follow button)`);
-    console.log(`[DEBUG] Follow button details:`, {
-      ariaLabel: followButton.getAttribute('aria-label'),
-      text: followButton.textContent?.substring(0, 50),
-      dataTestId: followButton.getAttribute('data-testid')
-    });
-    return true; // フォローしていない
+    console.log(`[DEBUG] @${accountName || 'unknown'}: Not following (found "Follow" button)`);
+    console.log(`[DEBUG] Button text: "${followButton.textContent?.substring(0, 50)}"`);
+    return true; // フォローしていない → 非表示
   }
   
   // ボタンが見つからない場合
   console.log(`[DEBUG] @${accountName || 'unknown'}: No follow buttons found`);
-  console.log(`[DEBUG] All buttons in tweet:`, allButtons.map(btn => ({
-    tag: btn.tagName,
-    ariaLabel: btn.getAttribute('aria-label'),
-    text: btn.textContent?.substring(0, 30),
-    dataTestId: btn.getAttribute('data-testid')
-  })));
+  console.log(`[DEBUG] All button texts:`, allButtons.map(btn => btn.textContent?.substring(0, 50)).filter(Boolean));
   
   // ボタンが見つからない場合、デフォルトで「フォローしていない」と判定
   // （フォローしていない人のツイートは基本的に非表示にする）
