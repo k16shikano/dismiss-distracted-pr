@@ -1,4 +1,4 @@
-# dismiss-distracted-pr
+# dismiss-distracting-tw
 
 ## 概要
 
