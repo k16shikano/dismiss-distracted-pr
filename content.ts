@@ -347,11 +347,11 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
     const accountName = getAccountName(tweetElement);
     console.log(`[DEBUG] Checking and potentially dismissing @${accountName || 'unknown'}: ${reason}`);
     
-    // タイムアウトを設定（5秒で強制解決、スクロール中は処理を中断）
+    // タイムアウトを設定（3秒で強制解決、処理が停滞しないように）
     const timeoutId = setTimeout(() => {
       console.warn(`[DEBUG] @${accountName || 'unknown'}: Timeout in checkAndDismissTweet, resolving as false`);
       safeResolve(false);
-    }, 5000); // 10秒から5秒に短縮
+    }, 3000); // 5秒から3秒に短縮
     
     // 解決時にタイムアウトをクリアする関数
     const safeResolve = (value: boolean) => {
@@ -384,7 +384,7 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
     
     // メニューが表示されるまで待つ（ポーリングで確認）
     let attempts = 0;
-    const maxAttempts = 10; // 最大1秒待つ（100ms × 10、スクロール中は高速処理）
+    const maxAttempts = 5; // 最大0.5秒待つ（100ms × 5、高速処理）
     
     const checkMenu = () => {
       const menuItems = Array.from(document.querySelectorAll('[role="menuitem"]')) as HTMLElement[];
@@ -719,7 +719,7 @@ function startMenuQueueWatchdog(): void {
         isProcessingMenu = false;
       });
     }
-  }, 100); // 100msごとにチェック（より頻繁に）
+  }, 50); // 50msごとにチェック（より頻繁に、停滞を防ぐ）
 }
 
 // メニュー操作をキューに追加して順番に処理
@@ -759,16 +759,18 @@ async function processMenuQueue(): Promise<void> {
   const queueLength = menuQueue.length;
   console.log(`[DEBUG] Menu queue: Processing item, remaining in queue: ${queueLength}`);
   
-  // タイムアウトを設定（処理が止まらないように）
+  // タイムアウトを設定（処理が止まらないように、3秒で強制完了）
   const processingTimeout = setTimeout(() => {
     console.warn(`[DEBUG] Menu queue: Processing timeout, forcing completion`);
     isProcessingMenu = false;
     processedTweets.add(item.tweet);
-    // 次の処理を開始
-    if (menuQueue.length > 0) {
-      processMenuQueue();
-    }
-  }, 6000); // 6秒でタイムアウト
+    // 即座に次の処理を開始（停滞を防ぐ）
+    setTimeout(() => {
+      if (menuQueue.length > 0) {
+        processMenuQueue();
+      }
+    }, 0);
+  }, 3000); // 6秒から3秒に短縮
   
   try {
     const { tweet, isRetweet, reason } = item;
@@ -791,38 +793,32 @@ async function processMenuQueue(): Promise<void> {
     processedTweets.add(item.tweet);
   }
   
-  // 次のメニュー操作を処理（少し待ってから）
-  setTimeout(() => {
-    isProcessingMenu = false;
-    // 確実に次の処理を開始（スクロール中でもビューポート内なら処理）
-    if (menuQueue.length > 0) {
-      // ビューポート内のツイートがあるかチェック
-      const hasViewportTweet = menuQueue.some(item => {
-        const rect = item.tweet.getBoundingClientRect();
-        return rect.top < window.innerHeight && rect.bottom > 0;
-      });
-      
-      if (hasViewportTweet || !isScrolling) {
-        console.log(`[DEBUG] Menu queue: Continuing with ${menuQueue.length} items remaining`);
-        // 即座に次の処理を開始（ウォッチドッグに任せない）
+  // 次のメニュー操作を処理（即座に開始、停滞を防ぐ）
+  isProcessingMenu = false;
+  
+  // 確実に次の処理を開始（スクロール中でもビューポート内なら処理）
+  if (menuQueue.length > 0) {
+    // ビューポート内のツイートがあるかチェック
+    const hasViewportTweet = menuQueue.some(item => {
+      const rect = item.tweet.getBoundingClientRect();
+      return rect.top < window.innerHeight && rect.bottom > 0;
+    });
+    
+    if (hasViewportTweet || !isScrolling) {
+      console.log(`[DEBUG] Menu queue: Continuing with ${menuQueue.length} items remaining`);
+      // 即座に次の処理を開始（停滞を防ぐ）
+      setTimeout(() => {
         processMenuQueue().catch((error) => {
           console.error('[DEBUG] Error in processMenuQueue continuation:', error);
-          // エラーが発生してもフラグをリセットして再試行
           isProcessingMenu = false;
-          // ウォッチドッグが拾うように少し待つ
-          setTimeout(() => {
-            if (menuQueue.length > 0 && !isProcessingMenu) {
-              processMenuQueue();
-            }
-          }, 50);
         });
-      } else {
-        console.log(`[DEBUG] Menu queue: All items out of viewport during scroll, will resume after scroll stops`);
-      }
+      }, 0); // 即座に実行
     } else {
-      console.log(`[DEBUG] Menu queue: Queue is empty, processing complete`);
+      console.log(`[DEBUG] Menu queue: All items out of viewport during scroll, will resume after scroll stops`);
     }
-  }, 200); // 200ms待機
+  } else {
+    console.log(`[DEBUG] Menu queue: Queue is empty, processing complete`);
+  }
 }
 
 // ツイートを一時的に非表示にする
