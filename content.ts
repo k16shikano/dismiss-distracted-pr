@@ -1130,6 +1130,9 @@ try {
   // ウォッチドッグを開始（処理が止まらないように監視）
   startWatchdog();
   
+  // メニューキューのウォッチドッグを開始（メニューキューの処理が確実に開始されるように）
+  startMenuQueueWatchdog();
+  
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       try {
