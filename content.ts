@@ -986,20 +986,87 @@ setInterval(() => {
   }
 }, 1000);
 
-// スクロールイベントの監視を追加
+// スクロール中に新しく表示されたツイートを即座に処理
+let isScrolling = false;
+let scrollCheckInterval: ReturnType<typeof setInterval> | null = null;
+
 window.addEventListener('scroll', () => {
   // 「おすすめ」タブでない場合は処理しない
   if (!isRecommendedTab()) {
     return;
   }
   
-  if (!scrollTimeout) {
-    scrollTimeout = setTimeout(() => {
-      scanTweets();
-      scrollTimeout = null;
-    }, 500);
+  // スクロール開始を検出
+  if (!isScrolling) {
+    isScrolling = true;
+    console.log('[DEBUG] Scroll started, starting immediate viewport check');
+    
+    // スクロール中は即座にビューポート内のツイートをチェック
+    scanTweetsInViewportImmediate();
+    
+    // スクロール中は50msごとにビューポート内のツイートをチェック
+    if (scrollCheckInterval) {
+      clearInterval(scrollCheckInterval);
+    }
+    scrollCheckInterval = setInterval(() => {
+      if (isScrolling && isRecommendedTab()) {
+        scanTweetsInViewportImmediate();
+      }
+    }, 50); // 50msごとにチェック（スクロール中は頻繁にチェック）
   }
+  
+  // スクロール停止を検出（200ms後に停止とみなす）
+  if (scrollTimeout) {
+    clearTimeout(scrollTimeout);
+  }
+  scrollTimeout = setTimeout(() => {
+    isScrolling = false;
+    if (scrollCheckInterval) {
+      clearInterval(scrollCheckInterval);
+      scrollCheckInterval = null;
+    }
+    console.log('[DEBUG] Scroll stopped');
+    scrollTimeout = null;
+  }, 200);
 });
+
+// ビューポート内のツイートを即座にスキャン（スクロール中専用）
+function scanTweetsInViewportImmediate(): void {
+  try {
+    if (!isRecommendedTab()) {
+      return;
+    }
+    
+    // ビューポート内の未処理ツイートのみを即座に処理
+    const tweetArticles = Array.from(document.querySelectorAll('article')) as HTMLElement[];
+    const tweetsInViewport: HTMLElement[] = [];
+    
+    // ビューポート内の未処理ツイートを収集（制限なし、スクロール中はすべて処理）
+    for (const tweetEl of tweetArticles) {
+      // すでに処理済みのツイートはスキップ
+      if (processedTweets.has(tweetEl)) {
+        continue;
+      }
+      
+      // ビューポート内のツイートのみを処理
+      if (isInViewport(tweetEl)) {
+        tweetsInViewport.push(tweetEl);
+      }
+    }
+    
+    if (tweetsInViewport.length > 0) {
+      lastProcessTime = Date.now();
+      console.log(`[DEBUG] Scroll: Processing ${tweetsInViewport.length} new tweets in viewport immediately`);
+      
+      // 即座に処理を開始（非ブロッキング）
+      processTweetsInParallel(tweetsInViewport).catch((error) => {
+        console.error('Error in processTweetsInParallel (scroll viewport):', error);
+      });
+    }
+  } catch (error) {
+    console.error('Error in scanTweetsInViewportImmediate:', error);
+  }
+}
 
 // スクリプトの初期化
 try {
