@@ -98,11 +98,16 @@ function logDismissedTweet(accountName: string | null, reason: string): void {
 
 function isInViewport(element: HTMLElement): boolean {
   const rect = element.getBoundingClientRect();
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+  
+  // 部分的にでもビューポート内にある要素を検出（より緩い条件）
+  // 要素の一部がビューポート内にあればtrue
   return (
-    rect.top >= 0 &&
-    rect.left >= 0 &&
-    rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
-    rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+    rect.bottom > 0 &&
+    rect.right > 0 &&
+    rect.top < viewportHeight &&
+    rect.left < viewportWidth
   );
 }
 
@@ -569,27 +574,36 @@ function scanTweets(): void {
       }
     });
     
-    // ビューポート内のツイートを先に処理、その後ビューポート外のツイートを処理
-    const tweetsToProcess = [...tweetsInViewport, ...tweetsOutOfViewport];
+    console.log(`[DEBUG] Found ${tweetsInViewport.length} tweets in viewport, ${tweetsOutOfViewport.length} tweets out of viewport`);
     
-    console.log(`[DEBUG] Found ${tweetsToProcess.length} tweets to process (${tweetsInViewport.length} in viewport, ${tweetsOutOfViewport.length} out of viewport)`);
+    // ビューポート内のツイートを優先的に処理
+    if (tweetsInViewport.length > 0) {
+      lastProcessTime = Date.now();
+      console.log(`[DEBUG] Starting to process ${tweetsInViewport.length} tweets in viewport (priority)`);
+      
+      // ビューポート内のツイートを先に処理
+      processTweetsInParallel(tweetsInViewport).catch((error) => {
+        console.error('Error in processTweetsInParallel (viewport):', error);
+        setTimeout(() => scanTweets(), 100);
+      });
+    }
     
-    if (tweetsToProcess.length === 0) {
+    // ビューポート外のツイートは後で処理（ビューポート内の処理と並行して実行可能）
+    if (tweetsOutOfViewport.length > 0) {
+      // ビューポート内の処理が完了してから処理（少し待ってから）
+      setTimeout(() => {
+        lastProcessTime = Date.now();
+        console.log(`[DEBUG] Starting to process ${tweetsOutOfViewport.length} tweets out of viewport`);
+        processTweetsInParallel(tweetsOutOfViewport).catch((error) => {
+          console.error('Error in processTweetsInParallel (out of viewport):', error);
+        });
+      }, tweetsInViewport.length > 0 ? 1000 : 0);
+    }
+    
+    if (tweetsInViewport.length === 0 && tweetsOutOfViewport.length === 0) {
       closePremiumPlusModal();
       return;
     }
-    
-    // 処理開始（一切止まらないようにするため、非同期で実行し、待機しない）
-    lastProcessTime = Date.now();
-    console.log(`[DEBUG] Starting to process ${tweetsToProcess.length} tweets in parallel`);
-    
-    // すべてのツイートを並列で処理（メニュー操作はキューで管理）
-    // 待機せずに即座に次の処理を開始できるようにする
-    processTweetsInParallel(tweetsToProcess).catch((error) => {
-      console.error('Error in processTweetsInParallel:', error);
-      // エラーが発生しても即座に再開
-      setTimeout(() => scanTweets(), 100);
-    });
     
     // 処理完了を待たずに、すぐに次のスキャンを開始（一切止まらないようにする）
     setTimeout(() => scanTweets(), 500);
