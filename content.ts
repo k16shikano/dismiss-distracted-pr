@@ -21,18 +21,18 @@ function startWatchdog(): void {
     const now = Date.now();
     const timeSinceLastProcess = now - lastProcessTime;
     
-    // 30秒以上処理が実行されていない場合、処理を再開
-    if (timeSinceLastProcess > 30000) {
-      console.log('[DEBUG] Watchdog: No processing for 30+ seconds, resetting flags and resuming');
+    // 5秒以上処理が実行されていない場合、処理を再開
+    if (timeSinceLastProcess > 5000) {
+      console.log('[DEBUG] Watchdog: No processing for 5+ seconds, resetting flags and resuming');
       isProcessing = false;
       lastProcessTime = now;
       scanTweets();
       return;
     }
     
-    // 処理中フラグがtrueのまま5分以上経過している場合、リセット
-    if (isProcessing && timeSinceLastProcess > 300000) {
-      console.log('[DEBUG] Watchdog: Processing flag stuck for 5+ minutes, resetting');
+    // 処理中フラグがtrueのまま30秒以上経過している場合、リセット
+    if (isProcessing && timeSinceLastProcess > 30000) {
+      console.log('[DEBUG] Watchdog: Processing flag stuck for 30+ seconds, resetting');
       isProcessing = false;
       lastProcessTime = now;
       scanTweets();
@@ -52,7 +52,7 @@ function startWatchdog(): void {
         scanTweets();
       }
     }
-  }, 10000); // 10秒ごとにチェック
+  }, 1000); // 1秒ごとにチェック
 }
 
 // 「おすすめ」タブが選択されているかどうかを判定
