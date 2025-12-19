@@ -21,13 +21,24 @@ function startWatchdog(): void {
     const timeSinceLastProcess = now - lastProcessTime;
     
     // 常に未処理のツイートをチェックして処理を開始（一切止まらないようにする）
+    // ビューポート内のツイートを優先的に処理
     const tweetArticles = document.querySelectorAll('article');
-    const unprocessedTweets = Array.from(tweetArticles).filter(
-      article => !processedTweets.has(article as HTMLElement)
+    const unprocessedTweetsInViewport = Array.from(tweetArticles).filter(
+      article => {
+        const tweetEl = article as HTMLElement;
+        return !processedTweets.has(tweetEl) && isInViewport(tweetEl);
+      }
     );
     
-    if (unprocessedTweets.length > 0) {
-      console.log(`[DEBUG] Watchdog: Found ${unprocessedTweets.length} unprocessed tweets, processing immediately`);
+    const unprocessedTweetsOutOfViewport = Array.from(tweetArticles).filter(
+      article => {
+        const tweetEl = article as HTMLElement;
+        return !processedTweets.has(tweetEl) && !isInViewport(tweetEl);
+      }
+    );
+    
+    if (unprocessedTweetsInViewport.length > 0 || unprocessedTweetsOutOfViewport.length > 0) {
+      console.log(`[DEBUG] Watchdog: Found ${unprocessedTweetsInViewport.length} in viewport, ${unprocessedTweetsOutOfViewport.length} out of viewport, processing immediately`);
       lastProcessTime = now;
       scanTweets();
     }
@@ -538,8 +549,9 @@ function scanTweets(): void {
       return;
     }
     
-    // 処理対象のツイートを収集（処理済みでない、すべてのツイートを先読み）
-    const tweetsToProcess: HTMLElement[] = [];
+    // 処理対象のツイートを収集（ビューポート内を優先）
+    const tweetsInViewport: HTMLElement[] = [];
+    const tweetsOutOfViewport: HTMLElement[] = [];
     
     tweetArticles.forEach((article) => {
       const tweetEl = article as HTMLElement;
@@ -549,11 +561,18 @@ function scanTweets(): void {
         return;
       }
       
-      // すべてのツイートを処理対象に追加（ビューポート外も含む）
-      tweetsToProcess.push(tweetEl);
+      // ビューポート内のツイートを優先的に処理
+      if (isInViewport(tweetEl)) {
+        tweetsInViewport.push(tweetEl);
+      } else {
+        tweetsOutOfViewport.push(tweetEl);
+      }
     });
     
-    console.log(`[DEBUG] Found ${tweetsToProcess.length} tweets to process`);
+    // ビューポート内のツイートを先に処理、その後ビューポート外のツイートを処理
+    const tweetsToProcess = [...tweetsInViewport, ...tweetsOutOfViewport];
+    
+    console.log(`[DEBUG] Found ${tweetsToProcess.length} tweets to process (${tweetsInViewport.length} in viewport, ${tweetsOutOfViewport.length} out of viewport)`);
     
     if (tweetsToProcess.length === 0) {
       closePremiumPlusModal();
