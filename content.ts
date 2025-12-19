@@ -4,8 +4,7 @@ let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 // 処理済みのツイートを記録（グローバル）
 const processedTweets = new Set<HTMLElement>();
 
-// 処理中フラグ（同時に複数のツイートを処理しないようにする）
-let isProcessing = false;
+// 処理中フラグを削除：一切止まらないようにするため
 
 // 最後に処理が実行された時刻
 let lastProcessTime = Date.now();
@@ -21,38 +20,18 @@ function startWatchdog(): void {
     const now = Date.now();
     const timeSinceLastProcess = now - lastProcessTime;
     
-    // 5秒以上処理が実行されていない場合、処理を再開
-    if (timeSinceLastProcess > 5000) {
-      console.log('[DEBUG] Watchdog: No processing for 5+ seconds, resetting flags and resuming');
-      isProcessing = false;
+    // 常に未処理のツイートをチェックして処理を開始（一切止まらないようにする）
+    const tweetArticles = document.querySelectorAll('article');
+    const unprocessedTweets = Array.from(tweetArticles).filter(
+      article => !processedTweets.has(article as HTMLElement)
+    );
+    
+    if (unprocessedTweets.length > 0) {
+      console.log(`[DEBUG] Watchdog: Found ${unprocessedTweets.length} unprocessed tweets, processing immediately`);
       lastProcessTime = now;
       scanTweets();
-      return;
     }
-    
-    // 処理中フラグがtrueのまま30秒以上経過している場合、リセット
-    if (isProcessing && timeSinceLastProcess > 30000) {
-      console.log('[DEBUG] Watchdog: Processing flag stuck for 30+ seconds, resetting');
-      isProcessing = false;
-      lastProcessTime = now;
-      scanTweets();
-      return;
-    }
-    
-    // 処理中でなく、新しいツイートがある場合は処理を開始
-    if (!isProcessing) {
-      const tweetArticles = document.querySelectorAll('article');
-      const unprocessedTweets = Array.from(tweetArticles).filter(
-        article => !processedTweets.has(article as HTMLElement)
-      );
-      
-      if (unprocessedTweets.length > 0) {
-        console.log(`[DEBUG] Watchdog: Found ${unprocessedTweets.length} unprocessed tweets, resuming`);
-        lastProcessTime = now;
-        scanTweets();
-      }
-    }
-  }, 1000); // 1秒ごとにチェック
+  }, 100); // 100msごとにチェック（一切止まらないようにする）
 }
 
 // 「おすすめ」タブが選択されているかどうかを判定
@@ -550,11 +529,7 @@ function scanTweets(): void {
       return;
     }
     
-    // 既に処理中の場合はスキップ
-    if (isProcessing) {
-      console.log('[DEBUG] Already processing, skipping scan');
-      return;
-    }
+    // 処理フラグを削除：一切止まらないようにするため、常に処理を実行
     
     const tweetArticles = document.querySelectorAll('article');
     console.log(`[DEBUG] Found ${tweetArticles.length} article elements`);
@@ -585,21 +560,24 @@ function scanTweets(): void {
       return;
     }
     
-    // 処理開始
-    isProcessing = true;
+    // 処理開始（一切止まらないようにするため、非同期で実行し、待機しない）
     lastProcessTime = Date.now();
     console.log(`[DEBUG] Starting to process ${tweetsToProcess.length} tweets in parallel`);
     
     // すべてのツイートを並列で処理（メニュー操作はキューで管理）
+    // 待機せずに即座に次の処理を開始できるようにする
     processTweetsInParallel(tweetsToProcess).catch((error) => {
       console.error('Error in processTweetsInParallel:', error);
-      isProcessing = false;
-      // エラーが発生しても再開できるようにする
-      setTimeout(() => scanTweets(), 1000);
+      // エラーが発生しても即座に再開
+      setTimeout(() => scanTweets(), 100);
     });
+    
+    // 処理完了を待たずに、すぐに次のスキャンを開始（一切止まらないようにする）
+    setTimeout(() => scanTweets(), 500);
   } catch (error) {
     console.error('Error in scanTweets:', error);
-    isProcessing = false;
+    // エラーが発生しても即座に再開
+    setTimeout(() => scanTweets(), 100);
   }
 }
 
@@ -729,24 +707,15 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
   // 非表示処理を削除したため、再表示処理も不要
   
   console.log(`[DEBUG] Finished processing ${tweets.length} tweets`);
-  isProcessing = false;
   lastProcessTime = Date.now();
   closePremiumPlusModal();
   
-  // 処理完了後、未処理のツイートがあれば再開
+  // 処理完了後、即座に次のスキャンを開始（一切止まらないようにする）
   setTimeout(() => {
-    if (!isProcessing && isRecommendedTab()) {
-      const tweetArticles = document.querySelectorAll('article');
-      const unprocessedTweets = Array.from(tweetArticles).filter(
-        article => !processedTweets.has(article as HTMLElement)
-      );
-      
-      if (unprocessedTweets.length > 0) {
-        console.log(`[DEBUG] Found ${unprocessedTweets.length} unprocessed tweets after completion, resuming`);
-        scanTweets();
-      }
+    if (isRecommendedTab()) {
+      scanTweets();
     }
-  }, 1000);
+  }, 100);
 }
 
 // MutationObserverで動的追加にも対応（描画更新を検出して処理）
@@ -825,7 +794,6 @@ try {
         setTimeout(() => scanTweets(), 1000);
       } catch (error) {
         console.error('Error in DOMContentLoaded handler:', error);
-        isProcessing = false;
       }
     });
   } else {
@@ -833,7 +801,6 @@ try {
       setTimeout(() => scanTweets(), 1000);
     } catch (error) {
       console.error('Error in initial scanTweets:', error);
-      isProcessing = false;
     }
   }
 } catch (error) {
@@ -842,6 +809,5 @@ try {
     message: error instanceof Error ? error.message : String(error),
     stack: error instanceof Error ? error.stack : undefined
   });
-  isProcessing = false;
 }
 
