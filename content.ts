@@ -702,13 +702,19 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
     }
     
     const promise = (async () => {
+      const accountName = getAccountName(tweetEl);
+      console.log(`[DEBUG] Processing tweet: @${accountName || 'unknown'}`);
+      console.log(`[DEBUG] @${accountName || 'unknown'}: Promise started`);
+      
       try {
-        const accountName = getAccountName(tweetEl);
-        console.log(`[DEBUG] Processing tweet: @${accountName || 'unknown'}`);
-        
         // プロモーションツイートの処理（メニュー操作不要なので即座に処理）
         console.log(`[DEBUG] @${accountName || 'unknown'}: Checking if promoted...`);
-        const isPromo = isPromoted(tweetEl);
+        let isPromo = false;
+        try {
+          isPromo = isPromoted(tweetEl);
+        } catch (error) {
+          console.error(`[DEBUG] @${accountName || 'unknown'}: Error in isPromoted:`, error);
+        }
         console.log(`[DEBUG] @${accountName || 'unknown'}: Is promoted: ${isPromo}`);
         
         if (isPromo) {
@@ -725,7 +731,12 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
         
         // リツイートかどうかを確認
         console.log(`[DEBUG] @${accountName || 'unknown'}: Checking if retweet...`);
-        const isRT = isRetweet(tweetEl);
+        let isRT = false;
+        try {
+          isRT = isRetweet(tweetEl);
+        } catch (error) {
+          console.error(`[DEBUG] @${accountName || 'unknown'}: Error in isRetweet:`, error);
+        }
         console.log(`[DEBUG] @${accountName || 'unknown'}: Is retweet: ${isRT}`);
         
         // メニュー操作が必要な場合はキューに追加
@@ -748,10 +759,13 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
     })();
     
     promises.push(promise);
+    console.log(`[DEBUG] Added promise to array, total promises: ${promises.length}`);
   }
   
+  console.log(`[DEBUG] Starting to await ${promises.length} promises`);
   // すべての処理が完了するまで待機
   await Promise.all(promises);
+  console.log(`[DEBUG] All promises completed`);
   
   // メニューキューが空になるまで待機
   while (menuQueue.length > 0 || isProcessingMenu) {
