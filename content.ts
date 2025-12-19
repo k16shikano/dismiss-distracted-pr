@@ -770,6 +770,23 @@ async function processMenuQueue(): Promise<void> {
     }
   }, 6000); // 6秒でタイムアウト
   
+  // スクロール中でも処理を継続（ビューポート内のツイート判定を最優先）
+  // ただし、処理中のツイートがビューポート外の場合は少し待つ
+  if (isScrolling) {
+    const rect = item.tweet.getBoundingClientRect();
+    const isInView = rect.top < window.innerHeight && rect.bottom > 0;
+    
+    if (!isInView) {
+      // ビューポート外のツイートは少し待つ（ビューポート内を優先）
+      console.log(`[DEBUG] Menu queue: Scrolling, tweet out of viewport, deferring (queue length: ${menuQueue.length})`);
+      // キューに戻す（先頭に戻す）
+      menuQueue.unshift(item);
+      isProcessingMenu = false;
+      clearTimeout(processingTimeout);
+      return;
+    }
+  }
+  
   try {
     const { tweet, isRetweet, reason } = item;
     const accountName = getAccountName(tweet);
