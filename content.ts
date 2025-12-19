@@ -828,17 +828,34 @@ const observer = new MutationObserver((mutations) => {
 });
 
 // document.bodyが存在する場合のみobserverを設定
-if (document.body) {
-  observer.observe(document.body, { childList: true, subtree: true });
-} else {
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      if (document.body) {
-        observer.observe(document.body, { childList: true, subtree: true });
-      }
+// より積極的に監視するため、複数の要素を監視
+function setupObserver(): void {
+  if (document.body) {
+    // メインのタイムラインコンテナを探す
+    const timeline = document.querySelector('[data-testid="primaryColumn"]') || 
+                     document.querySelector('main') ||
+                     document.body;
+    
+    observer.observe(timeline, { 
+      childList: true, 
+      subtree: true,
+      attributes: false,
+      characterData: false
     });
+    
+    console.log('[DEBUG] MutationObserver: Started observing', timeline);
+  } else {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        setupObserver();
+      });
+    } else {
+      setTimeout(setupObserver, 1000);
+    }
   }
 }
+
+setupObserver();
 
 // スクロールイベントの監視を追加
 window.addEventListener('scroll', () => {
