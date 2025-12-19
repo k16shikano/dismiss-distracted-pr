@@ -708,8 +708,18 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
       } catch (error) {
         console.error('[DEBUG] Error getting account name:', error);
       }
-      console.log(`[DEBUG] Processing tweet: @${accountName || 'unknown'}`);
-      console.log(`[DEBUG] @${accountName || 'unknown'}: Promise started`);
+      
+      try {
+        console.log(`[DEBUG] Processing tweet: @${accountName || 'unknown'}`);
+      } catch (error) {
+        console.error('[DEBUG] Error in first console.log:', error);
+      }
+      
+      try {
+        console.log(`[DEBUG] @${accountName || 'unknown'}: Promise started`);
+      } catch (error) {
+        console.error('[DEBUG] Error in second console.log:', error);
+      }
       
       try {
         // プロモーションツイートの処理（メニュー操作不要なので即座に処理）
@@ -755,10 +765,16 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
         
         // メニューキューを処理開始
         console.log(`[DEBUG] @${accountName || 'unknown'}: Starting menu queue processing...`);
-        processMenuQueue();
+        try {
+          processMenuQueue().catch((error) => {
+            console.error(`[DEBUG] Error in processMenuQueue:`, error);
+          });
+        } catch (error) {
+          console.error(`[DEBUG] Error calling processMenuQueue:`, error);
+        }
         console.log(`[DEBUG] @${accountName || 'unknown'}: Finished processing setup`);
       } catch (error) {
-        console.error(`[DEBUG] Error processing tweet @${getAccountName(tweetEl) || 'unknown'}:`, error);
+        console.error(`[DEBUG] Error processing tweet @${accountName || 'unknown'}:`, error);
         console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
       }
     })();
