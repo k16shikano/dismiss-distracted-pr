@@ -826,23 +826,10 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
     });
   }
   
-  // メニューキューが空になるまで待機
-  while (menuQueue.length > 0 || isProcessingMenu) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  
-  // 非表示処理を削除したため、再表示処理も不要
-  
-  console.log(`[DEBUG] Finished processing ${tweets.length} tweets`);
+  // 非ブロッキング：メニューキューの完了を待たない
+  // メニューキューの処理は別途継続的に実行される
+  console.log(`[DEBUG] Finished setting up ${tweets.length} tweets (non-blocking)`);
   lastProcessTime = Date.now();
-  closePremiumPlusModal();
-  
-  // 処理完了後、即座に次のスキャンを開始（一切止まらないようにする）
-  setTimeout(() => {
-    if (isRecommendedTab()) {
-      scanTweets();
-    }
-  }, 100);
 }
 
 // MutationObserverで動的追加にも対応（描画更新を検出して処理）
