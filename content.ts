@@ -758,37 +758,72 @@ const observer = new MutationObserver((mutations) => {
     return;
   }
   
-  // article要素が追加された瞬間を検出
+  // article要素が追加された瞬間を検出（より積極的に検出）
   let hasNewTweets = false;
+  const newArticles: HTMLElement[] = [];
+  
   for (const mutation of mutations) {
     if (mutation.type === 'childList') {
       for (const node of Array.from(mutation.addedNodes)) {
         if (node.nodeType === Node.ELEMENT_NODE) {
           const element = node as HTMLElement;
-          // article要素またはarticle要素を含む要素が追加された
-          if (element.tagName === 'ARTICLE' || element.querySelector('article')) {
-            hasNewTweets = true;
-            break;
+          
+          // article要素が直接追加された場合
+          if (element.tagName === 'ARTICLE') {
+            if (!processedTweets.has(element)) {
+              newArticles.push(element);
+              hasNewTweets = true;
+            }
+          }
+          // article要素を含む要素が追加された場合
+          else {
+            const articles = element.querySelectorAll('article');
+            for (const article of Array.from(articles)) {
+              const articleEl = article as HTMLElement;
+              if (!processedTweets.has(articleEl)) {
+                newArticles.push(articleEl);
+                hasNewTweets = true;
+              }
+            }
           }
         }
       }
     }
-    if (hasNewTweets) break;
   }
   
   // 新しいツイートが見つかった場合、即座に処理を開始（プッシュ通知で読み込まれたツイートにも対応）
   if (hasNewTweets) {
-    console.log('[DEBUG] MutationObserver: New tweets detected, processing immediately');
-    // 即座に処理を開始（待機しない）
-    scanTweets();
+    console.log(`[DEBUG] MutationObserver: ${newArticles.length} new tweets detected, processing immediately`);
     
-    // 念のため、少し待ってから再度スキャン（ツイートが完全に読み込まれるまで待つ）
-    if (!scrollTimeout) {
-      scrollTimeout = setTimeout(() => {
-        scanTweets();
-        scrollTimeout = null;
-      }, 200);
+    // 新しいツイートを即座に処理
+    if (newArticles.length > 0) {
+      // ビューポート内のツイートを優先
+      const inViewport = newArticles.filter(el => isInViewport(el));
+      const outOfViewport = newArticles.filter(el => !isInViewport(el));
+      
+      if (inViewport.length > 0) {
+        console.log(`[DEBUG] MutationObserver: Processing ${inViewport.length} new tweets in viewport immediately`);
+        lastProcessTime = Date.now();
+        processTweetsInParallel(inViewport).catch((error) => {
+          console.error('Error processing new tweets:', error);
+        });
+      }
+      
+      if (outOfViewport.length > 0) {
+        setTimeout(() => {
+          console.log(`[DEBUG] MutationObserver: Processing ${outOfViewport.length} new tweets out of viewport`);
+          lastProcessTime = Date.now();
+          processTweetsInParallel(outOfViewport).catch((error) => {
+            console.error('Error processing new tweets:', error);
+          });
+        }, 500);
+      }
     }
+    
+    // 念のため、全体のスキャンも実行
+    setTimeout(() => {
+      scanTweets();
+    }, 100);
   }
 });
 
