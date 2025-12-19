@@ -315,6 +315,18 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
     const accountName = getAccountName(tweetElement);
     console.log(`[DEBUG] Checking and potentially dismissing @${accountName || 'unknown'}: ${reason}`);
     
+    // タイムアウトを設定（10秒で強制解決）
+    const timeoutId = setTimeout(() => {
+      console.warn(`[DEBUG] @${accountName || 'unknown'}: Timeout in checkAndDismissTweet, resolving as false`);
+      resolve(false);
+    }, 10000);
+    
+    // 解決時にタイムアウトをクリアする関数
+    const safeResolve = (value: boolean) => {
+      clearTimeout(timeoutId);
+      resolve(value);
+    };
+    
     // Moreボタンを探す
     let moreBtn = tweetElement.querySelector('[aria-label="More"]') || 
                    tweetElement.querySelector('[aria-label="その他"]') ||
@@ -330,7 +342,7 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
     
     if (!moreBtn) {
       console.log(`[DEBUG] @${accountName || 'unknown'}: More button not found, defaulting to following`);
-      resolve(false); // ボタンが見つからない場合は「フォローしている」と判定（表示する）
+      safeResolve(false); // ボタンが見つからない場合は「フォローしている」と判定（表示する）
       return;
     }
     
@@ -366,7 +378,7 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
           console.log(`[DEBUG] Menu item text: "${unfollowItem.innerText?.substring(0, 50)}"`);
           // メニューを閉じる（Moreボタンを再度クリック）
           closeMenu(moreBtn as HTMLElement);
-          setTimeout(() => resolve(false), 300); // フォローしている → 表示
+          setTimeout(() => safeResolve(false), 300); // フォローしている → 表示
           return;
         }
         
@@ -396,14 +408,17 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
             
             // 「このポストは関連性がありません」ボタンが表示されるまで待ってクリック
             clickRelevanceButton(tweetElement, accountName).then(() => {
-              setTimeout(() => resolve(true), 300); // 非表示にした
+              setTimeout(() => safeResolve(true), 300); // 非表示にした
+            }).catch((error) => {
+              console.error(`[DEBUG] Error in clickRelevanceButton:`, error);
+              setTimeout(() => safeResolve(true), 300); // エラーでも続行
             });
             return;
           } else {
             console.warn(`[DEBUG] "Not interested" menu item not found`);
             // メニューを閉じる
             closeMenu(moreBtn as HTMLElement);
-            setTimeout(() => resolve(true), 300); // フォローしていないが、メニュー項目が見つからなかった
+            setTimeout(() => safeResolve(true), 300); // フォローしていないが、メニュー項目が見つからなかった
             return;
           }
         }
@@ -412,7 +427,7 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
         console.log(`[DEBUG] @${accountName || 'unknown'}: No follow/unfollow menu items found`);
         // メニューを閉じる
         closeMenu(moreBtn as HTMLElement);
-        setTimeout(() => resolve(false), 300); // デフォルトで「フォローしている」と判定（表示する）
+        setTimeout(() => safeResolve(false), 300); // デフォルトで「フォローしている」と判定（表示する）
       } else {
         attempts++;
         setTimeout(checkMenu, 100);
@@ -659,8 +674,19 @@ async function processMenuQueue(): Promise<void> {
   // 次のメニュー操作を処理（少し待ってから）
   setTimeout(() => {
     isProcessingMenu = false;
-    processMenuQueue();
-  }, 800);
+    // 確実に次の処理を開始
+    if (menuQueue.length > 0) {
+      console.log(`[DEBUG] Menu queue: Continuing with ${menuQueue.length} items remaining`);
+      processMenuQueue().catch((error) => {
+        console.error('[DEBUG] Error in processMenuQueue continuation:', error);
+        // エラーが発生してもフラグをリセットして再試行
+        isProcessingMenu = false;
+        setTimeout(() => processMenuQueue(), 500);
+      });
+    } else {
+      console.log(`[DEBUG] Menu queue: Queue is empty, processing complete`);
+    }
+  }, 500); // 800msから500msに短縮
 }
 
 // ツイートを一時的に非表示にする
