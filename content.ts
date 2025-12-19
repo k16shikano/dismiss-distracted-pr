@@ -7,6 +7,54 @@ const processedTweets = new Set<HTMLElement>();
 // 処理中フラグ（同時に複数のツイートを処理しないようにする）
 let isProcessing = false;
 
+// 最後に処理が実行された時刻
+let lastProcessTime = Date.now();
+
+// 処理が止まっていないか定期的にチェックして再開
+function startWatchdog(): void {
+  setInterval(() => {
+    // 「おすすめ」タブでない場合は処理しない
+    if (!isRecommendedTab()) {
+      return;
+    }
+    
+    const now = Date.now();
+    const timeSinceLastProcess = now - lastProcessTime;
+    
+    // 30秒以上処理が実行されていない場合、処理を再開
+    if (timeSinceLastProcess > 30000) {
+      console.log('[DEBUG] Watchdog: No processing for 30+ seconds, resetting flags and resuming');
+      isProcessing = false;
+      lastProcessTime = now;
+      scanTweets();
+      return;
+    }
+    
+    // 処理中フラグがtrueのまま5分以上経過している場合、リセット
+    if (isProcessing && timeSinceLastProcess > 300000) {
+      console.log('[DEBUG] Watchdog: Processing flag stuck for 5+ minutes, resetting');
+      isProcessing = false;
+      lastProcessTime = now;
+      scanTweets();
+      return;
+    }
+    
+    // 処理中でなく、新しいツイートがある場合は処理を開始
+    if (!isProcessing) {
+      const tweetArticles = document.querySelectorAll('article');
+      const unprocessedTweets = Array.from(tweetArticles).filter(
+        article => !processedTweets.has(article as HTMLElement)
+      );
+      
+      if (unprocessedTweets.length > 0) {
+        console.log(`[DEBUG] Watchdog: Found ${unprocessedTweets.length} unprocessed tweets, resuming`);
+        lastProcessTime = now;
+        scanTweets();
+      }
+    }
+  }, 10000); // 10秒ごとにチェック
+}
+
 // 「おすすめ」タブが選択されているかどうかを判定
 function isRecommendedTab(): boolean {
   // URLで判定（ホーム画面でない場合はfalse）
@@ -539,10 +587,16 @@ function scanTweets(): void {
     
     // 処理開始
     isProcessing = true;
+    lastProcessTime = Date.now();
     console.log(`[DEBUG] Starting to process ${tweetsToProcess.length} tweets in parallel`);
     
     // すべてのツイートを並列で処理（メニュー操作はキューで管理）
-    processTweetsInParallel(tweetsToProcess);
+    processTweetsInParallel(tweetsToProcess).catch((error) => {
+      console.error('Error in processTweetsInParallel:', error);
+      isProcessing = false;
+      // エラーが発生しても再開できるようにする
+      setTimeout(() => scanTweets(), 1000);
+    });
   } catch (error) {
     console.error('Error in scanTweets:', error);
     isProcessing = false;
@@ -676,7 +730,23 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
   
   console.log(`[DEBUG] Finished processing ${tweets.length} tweets`);
   isProcessing = false;
+  lastProcessTime = Date.now();
   closePremiumPlusModal();
+  
+  // 処理完了後、未処理のツイートがあれば再開
+  setTimeout(() => {
+    if (!isProcessing && isRecommendedTab()) {
+      const tweetArticles = document.querySelectorAll('article');
+      const unprocessedTweets = Array.from(tweetArticles).filter(
+        article => !processedTweets.has(article as HTMLElement)
+      );
+      
+      if (unprocessedTweets.length > 0) {
+        console.log(`[DEBUG] Found ${unprocessedTweets.length} unprocessed tweets after completion, resuming`);
+        scanTweets();
+      }
+    }
+  }, 1000);
 }
 
 // MutationObserverで動的追加にも対応（描画更新を検出して処理）
@@ -745,12 +815,17 @@ window.addEventListener('scroll', () => {
 // スクリプトの初期化
 try {
   console.log('Twitter Ad Filter Extension: Initialized');
+  
+  // ウォッチドッグを開始（処理が止まらないように監視）
+  startWatchdog();
+  
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       try {
         setTimeout(() => scanTweets(), 1000);
       } catch (error) {
         console.error('Error in DOMContentLoaded handler:', error);
+        isProcessing = false;
       }
     });
   } else {
@@ -758,6 +833,7 @@ try {
       setTimeout(() => scanTweets(), 1000);
     } catch (error) {
       console.error('Error in initial scanTweets:', error);
+      isProcessing = false;
     }
   }
 } catch (error) {
@@ -766,5 +842,6 @@ try {
     message: error instanceof Error ? error.message : String(error),
     stack: error instanceof Error ? error.stack : undefined
   });
+  isProcessing = false;
 }
 
