@@ -631,6 +631,24 @@ function scanTweets(): void {
 const menuQueue: Array<{ tweet: HTMLElement; isRetweet: boolean; reason: string }> = [];
 let isProcessingMenu = false;
 
+// メニューキューの処理を確実に開始するためのウォッチドッグ
+function startMenuQueueWatchdog(): void {
+  setInterval(() => {
+    if (!isRecommendedTab()) {
+      return;
+    }
+    
+    // メニューキューにアイテムがあり、処理中でない場合は処理を開始
+    if (menuQueue.length > 0 && !isProcessingMenu) {
+      console.log(`[DEBUG] Menu queue watchdog: Found ${menuQueue.length} items, starting processing`);
+      processMenuQueue().catch((error) => {
+        console.error('[DEBUG] Menu queue watchdog: Error starting processing:', error);
+        isProcessingMenu = false;
+      });
+    }
+  }, 200); // 200msごとにチェック
+}
+
 // メニュー操作をキューに追加して順番に処理
 async function processMenuQueue(): Promise<void> {
   if (isProcessingMenu) {
@@ -675,16 +693,22 @@ async function processMenuQueue(): Promise<void> {
     // 確実に次の処理を開始
     if (menuQueue.length > 0) {
       console.log(`[DEBUG] Menu queue: Continuing with ${menuQueue.length} items remaining`);
+      // 即座に次の処理を開始（ウォッチドッグに任せない）
       processMenuQueue().catch((error) => {
         console.error('[DEBUG] Error in processMenuQueue continuation:', error);
         // エラーが発生してもフラグをリセットして再試行
         isProcessingMenu = false;
-        setTimeout(() => processMenuQueue(), 300);
+        // ウォッチドッグが拾うように少し待つ
+        setTimeout(() => {
+          if (menuQueue.length > 0 && !isProcessingMenu) {
+            processMenuQueue();
+          }
+        }, 100);
       });
     } else {
       console.log(`[DEBUG] Menu queue: Queue is empty, processing complete`);
     }
-  }, 300); // 500msから300msに短縮（スクロール中は高速処理）
+  }, 200); // 300msから200msに短縮（より高速に処理）
 }
 
 // ツイートを一時的に非表示にする
