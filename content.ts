@@ -776,13 +776,19 @@ const observer = new MutationObserver((mutations) => {
     if (hasNewTweets) break;
   }
   
-  // 新しいツイートが見つかった場合、処理を開始（非表示はprocessTweetsInParallel内で実行）
-  if (hasNewTweets && !scrollTimeout) {
-    // より早く処理するため、待機時間を短縮
-    scrollTimeout = setTimeout(() => {
-      scanTweets();
-      scrollTimeout = null;
-    }, 50);
+  // 新しいツイートが見つかった場合、即座に処理を開始（プッシュ通知で読み込まれたツイートにも対応）
+  if (hasNewTweets) {
+    console.log('[DEBUG] MutationObserver: New tweets detected, processing immediately');
+    // 即座に処理を開始（待機しない）
+    scanTweets();
+    
+    // 念のため、少し待ってから再度スキャン（ツイートが完全に読み込まれるまで待つ）
+    if (!scrollTimeout) {
+      scrollTimeout = setTimeout(() => {
+        scanTweets();
+        scrollTimeout = null;
+      }, 200);
+    }
   }
 });
 
