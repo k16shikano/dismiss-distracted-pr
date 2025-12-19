@@ -9,19 +9,58 @@ const processedTweets = new Set<HTMLElement>();
 // 最後に処理が実行された時刻
 let lastProcessTime = Date.now();
 
-// 処理が止まっていないか定期的にチェックして再開
+// ビューポート内のツイートを最優先で判定（すべての処理よりも優先）
+function checkViewportTweetsImmediate(): void {
+  if (!isRecommendedTab()) {
+    return;
+  }
+  
+  try {
+    const tweetArticles = Array.from(document.querySelectorAll('article')) as HTMLElement[];
+    const unprocessedTweetsInViewport: HTMLElement[] = [];
+    
+    // ビューポート内の未処理ツイートを収集（制限なし、すべて処理）
+    for (const tweetEl of tweetArticles) {
+      if (processedTweets.has(tweetEl)) {
+        continue;
+      }
+      
+      if (isInViewport(tweetEl)) {
+        unprocessedTweetsInViewport.push(tweetEl);
+      }
+    }
+    
+    if (unprocessedTweetsInViewport.length > 0) {
+      lastProcessTime = Date.now();
+      console.log(`[DEBUG] Viewport priority: Found ${unprocessedTweetsInViewport.length} unprocessed tweets, processing immediately`);
+      
+      // 最優先で処理を開始（非ブロッキング）
+      processTweetsInParallel(unprocessedTweetsInViewport).catch((error) => {
+        console.error('Error in processTweetsInParallel (viewport priority):', error);
+      });
+    }
+  } catch (error) {
+    console.error('Error in checkViewportTweetsImmediate:', error);
+  }
+}
+
+// 処理が止まっていないか定期的にチェックして再開（ビューポート内を最優先）
 function startWatchdog(): void {
+  // ビューポート内のツイートを最優先でチェック（50msごと）
   setInterval(() => {
-    // 「おすすめ」タブでない場合は処理しない
+    if (!isRecommendedTab()) {
+      return;
+    }
+    checkViewportTweetsImmediate();
+  }, 50); // 50msごとにチェック（最優先）
+  
+  // 全体のスキャンも継続（200msごと）
+  setInterval(() => {
     if (!isRecommendedTab()) {
       return;
     }
     
     const now = Date.now();
-    const timeSinceLastProcess = now - lastProcessTime;
-    
-    // 常に未処理のツイートをチェックして処理を開始（一切止まらないようにする）
-    // ビューポート内のツイートを優先的に処理
     const tweetArticles = document.querySelectorAll('article');
     const unprocessedTweetsInViewport = Array.from(tweetArticles).filter(
       article => {
@@ -30,19 +69,12 @@ function startWatchdog(): void {
       }
     );
     
-    const unprocessedTweetsOutOfViewport = Array.from(tweetArticles).filter(
-      article => {
-        const tweetEl = article as HTMLElement;
-        return !processedTweets.has(tweetEl) && !isInViewport(tweetEl);
-      }
-    );
-    
-    if (unprocessedTweetsInViewport.length > 0 || unprocessedTweetsOutOfViewport.length > 0) {
-      console.log(`[DEBUG] Watchdog: Found ${unprocessedTweetsInViewport.length} in viewport, ${unprocessedTweetsOutOfViewport.length} out of viewport, processing immediately`);
+    if (unprocessedTweetsInViewport.length > 0) {
+      console.log(`[DEBUG] Watchdog: Found ${unprocessedTweetsInViewport.length} in viewport, processing immediately`);
       lastProcessTime = now;
       scanTweets();
     }
-  }, 200); // 200msごとにチェック（一切止まらないようにする）
+  }, 200); // 200msごとにチェック
 }
 
 // 「おすすめ」タブが選択されているかどうかを判定
@@ -668,13 +700,26 @@ function startMenuQueueWatchdog(): void {
     
     // メニューキューにアイテムがあり、処理中でない場合は処理を開始
     if (menuQueue.length > 0 && !isProcessingMenu) {
+      // ビューポート内のツイートを優先的に処理
+      const viewportItemIndex = menuQueue.findIndex(item => {
+        const rect = item.tweet.getBoundingClientRect();
+        return rect.top < window.innerHeight && rect.bottom > 0;
+      });
+      
+      if (viewportItemIndex > 0) {
+        // ビューポート内のツイートを先頭に移動
+        const viewportItem = menuQueue.splice(viewportItemIndex, 1)[0];
+        menuQueue.unshift(viewportItem);
+        console.log(`[DEBUG] Menu queue watchdog: Prioritized viewport tweet, queue length: ${menuQueue.length}`);
+      }
+      
       console.log(`[DEBUG] Menu queue watchdog: Found ${menuQueue.length} items, starting processing`);
       processMenuQueue().catch((error) => {
         console.error('[DEBUG] Menu queue watchdog: Error starting processing:', error);
         isProcessingMenu = false;
       });
     }
-  }, 200); // 200msごとにチェック
+  }, 100); // 100msごとにチェック（より頻繁に）
 }
 
 // メニュー操作をキューに追加して順番に処理
@@ -688,10 +733,20 @@ async function processMenuQueue(): Promise<void> {
     return;
   }
   
-  // スクロール中は処理を一時停止（スクロール停止後に再開）
-  if (isScrolling) {
-    console.log(`[DEBUG] Menu queue: Scrolling, deferring processing (queue length: ${menuQueue.length})`);
-    return;
+  // スクロール中でも処理を継続（ビューポート内のツイート判定を最優先）
+  // ただし、処理中のツイートがビューポート外の場合は少し待つ
+  if (isScrolling && item) {
+    const rect = item.tweet.getBoundingClientRect();
+    const isInView = rect.top < window.innerHeight && rect.bottom > 0;
+    
+    if (!isInView) {
+      // ビューポート外のツイートは少し待つ（ビューポート内を優先）
+      console.log(`[DEBUG] Menu queue: Scrolling, tweet out of viewport, deferring (queue length: ${menuQueue.length})`);
+      // キューに戻す（先頭に戻す）
+      menuQueue.unshift(item);
+      isProcessingMenu = false;
+      return;
+    }
   }
   
   isProcessingMenu = true;
@@ -739,27 +794,33 @@ async function processMenuQueue(): Promise<void> {
   // 次のメニュー操作を処理（少し待ってから）
   setTimeout(() => {
     isProcessingMenu = false;
-    // 確実に次の処理を開始
-    if (menuQueue.length > 0 && !isScrolling) {
-      console.log(`[DEBUG] Menu queue: Continuing with ${menuQueue.length} items remaining`);
-      // 即座に次の処理を開始（ウォッチドッグに任せない）
-      processMenuQueue().catch((error) => {
-        console.error('[DEBUG] Error in processMenuQueue continuation:', error);
-        // エラーが発生してもフラグをリセットして再試行
-        isProcessingMenu = false;
-        // ウォッチドッグが拾うように少し待つ
-        setTimeout(() => {
-          if (menuQueue.length > 0 && !isProcessingMenu && !isScrolling) {
-            processMenuQueue();
-          }
-        }, 100);
+    // 確実に次の処理を開始（スクロール中でもビューポート内なら処理）
+    if (menuQueue.length > 0) {
+      // ビューポート内のツイートがあるかチェック
+      const hasViewportTweet = menuQueue.some(item => {
+        const rect = item.tweet.getBoundingClientRect();
+        return rect.top < window.innerHeight && rect.bottom > 0;
       });
-    } else {
-      if (isScrolling) {
-        console.log(`[DEBUG] Menu queue: Scrolling, will resume after scroll stops`);
+      
+      if (hasViewportTweet || !isScrolling) {
+        console.log(`[DEBUG] Menu queue: Continuing with ${menuQueue.length} items remaining`);
+        // 即座に次の処理を開始（ウォッチドッグに任せない）
+        processMenuQueue().catch((error) => {
+          console.error('[DEBUG] Error in processMenuQueue continuation:', error);
+          // エラーが発生してもフラグをリセットして再試行
+          isProcessingMenu = false;
+          // ウォッチドッグが拾うように少し待つ
+          setTimeout(() => {
+            if (menuQueue.length > 0 && !isProcessingMenu) {
+              processMenuQueue();
+            }
+          }, 50);
+        });
       } else {
-        console.log(`[DEBUG] Menu queue: Queue is empty, processing complete`);
+        console.log(`[DEBUG] Menu queue: All items out of viewport during scroll, will resume after scroll stops`);
       }
+    } else {
+      console.log(`[DEBUG] Menu queue: Queue is empty, processing complete`);
     }
   }, 200); // 200ms待機
 }
