@@ -620,7 +620,12 @@ let isProcessingMenu = false;
 
 // メニュー操作をキューに追加して順番に処理
 async function processMenuQueue(): Promise<void> {
-  if (isProcessingMenu || menuQueue.length === 0) {
+  if (isProcessingMenu) {
+    console.log(`[DEBUG] Menu queue: Already processing, queue length: ${menuQueue.length}`);
+    return;
+  }
+  
+  if (menuQueue.length === 0) {
     return;
   }
   
@@ -631,9 +636,13 @@ async function processMenuQueue(): Promise<void> {
     return;
   }
   
+  const queueLength = menuQueue.length;
+  console.log(`[DEBUG] Menu queue: Processing item, remaining in queue: ${queueLength}`);
+  
   try {
     const { tweet, isRetweet, reason } = item;
     const accountName = getAccountName(tweet);
+    console.log(`[DEBUG] Menu queue: Processing @${accountName || 'unknown'}, isRetweet: ${isRetweet}, reason: ${reason}`);
     
     if (isRetweet) {
       await checkAndDismissRetweet(tweet, reason);
@@ -642,6 +651,7 @@ async function processMenuQueue(): Promise<void> {
     }
     
     processedTweets.add(tweet);
+    console.log(`[DEBUG] Menu queue: Completed processing @${accountName || 'unknown'}`);
   } catch (error) {
     console.error('Error processing menu queue:', error);
   }
@@ -715,8 +725,10 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
         // メニュー操作が必要な場合はキューに追加
         if (isRT) {
           menuQueue.push({ tweet: tweetEl, isRetweet: true, reason: "リツイート（フォローしていないアカウント）" });
+          console.log(`[DEBUG] Added retweet to menu queue: @${accountName || 'unknown'}, queue length: ${menuQueue.length}`);
         } else {
           menuQueue.push({ tweet: tweetEl, isRetweet: false, reason: "フォローしていないアカウント" });
+          console.log(`[DEBUG] Added tweet to menu queue: @${accountName || 'unknown'}, queue length: ${menuQueue.length}`);
         }
         
         // メニューキューを処理開始
