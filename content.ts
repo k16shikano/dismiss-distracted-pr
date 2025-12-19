@@ -784,9 +784,19 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
   }
   
   console.log(`[DEBUG] Starting to await ${promises.length} promises`);
-  // すべての処理が完了するまで待機
-  await Promise.all(promises);
-  console.log(`[DEBUG] All promises completed`);
+  // すべての処理が完了するまで待機（エラーがあっても続行）
+  try {
+    await Promise.allSettled(promises);
+    console.log(`[DEBUG] All promises settled`);
+  } catch (error) {
+    console.error(`[DEBUG] Error in Promise.allSettled:`, error);
+  }
+  
+  // メニューキューを確実に処理開始
+  console.log(`[DEBUG] Ensuring menu queue processing starts, queue length: ${menuQueue.length}`);
+  processMenuQueue().catch((error) => {
+    console.error(`[DEBUG] Error in final processMenuQueue call:`, error);
+  });
   
   // メニューキューが空になるまで待機
   while (menuQueue.length > 0 || isProcessingMenu) {
