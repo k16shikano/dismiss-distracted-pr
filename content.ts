@@ -707,7 +707,10 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
         console.log(`[DEBUG] Processing tweet: @${accountName || 'unknown'}`);
         
         // プロモーションツイートの処理（メニュー操作不要なので即座に処理）
+        console.log(`[DEBUG] @${accountName || 'unknown'}: Checking if promoted...`);
         const isPromo = isPromoted(tweetEl);
+        console.log(`[DEBUG] @${accountName || 'unknown'}: Is promoted: ${isPromo}`);
+        
         if (isPromo) {
           const text = tweetEl.innerText;
           if (shouldDismiss(text)) {
@@ -717,10 +720,13 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
             // 非表示のまま（ミュートされるので）
             return;
           }
+          console.log(`[DEBUG] @${accountName || 'unknown'}: Promoted but not dismissing`);
         }
         
         // リツイートかどうかを確認
+        console.log(`[DEBUG] @${accountName || 'unknown'}: Checking if retweet...`);
         const isRT = isRetweet(tweetEl);
+        console.log(`[DEBUG] @${accountName || 'unknown'}: Is retweet: ${isRT}`);
         
         // メニュー操作が必要な場合はキューに追加
         if (isRT) {
@@ -732,9 +738,12 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
         }
         
         // メニューキューを処理開始
+        console.log(`[DEBUG] @${accountName || 'unknown'}: Starting menu queue processing...`);
         processMenuQueue();
+        console.log(`[DEBUG] @${accountName || 'unknown'}: Finished processing setup`);
       } catch (error) {
-        console.error('Error processing tweet:', error);
+        console.error(`[DEBUG] Error processing tweet @${getAccountName(tweetEl) || 'unknown'}:`, error);
+        console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
       }
     })();
     
