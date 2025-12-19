@@ -438,23 +438,51 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
   });
 }
 
-// リツイートかどうかを判定
+// リツイートかどうかを判定（より正確に）
 function isRetweet(tweetElement: HTMLElement): boolean {
-  // リツイートの表示を探す（複数の方法で）
-  let retweetIndicator = tweetElement.querySelector('[data-testid="socialContext"]');
-  
-  if (!retweetIndicator) {
-    retweetIndicator = tweetElement.querySelector('[data-testid="retweet"]');
+  // リツイートの明確な指標を探す
+  // 1. socialContext要素（リツイートした人の情報が表示される）
+  const socialContext = tweetElement.querySelector('[data-testid="socialContext"]');
+  if (socialContext) {
+    const contextText = socialContext.textContent || '';
+    // "リツイート"や"Retweeted"というテキストが含まれているか確認
+    if (/リツイート|Retweeted|retweeted/i.test(contextText)) {
+      return true;
+    }
   }
   
-  // テキスト内容でも確認
-  const textContent = tweetElement.innerText || '';
-  const hasRetweetText = /リツイート|Retweeted|retweeted/i.test(textContent);
-  
-  // リツイートアイコンを探す
+  // 2. リツイートアイコン（より確実）
   const retweetIcon = tweetElement.querySelector('[data-testid="retweet"]');
+  if (retweetIcon) {
+    // アイコンが存在するだけでは不十分。親要素のテキストも確認
+    const iconParent = retweetIcon.closest('[role="button"]');
+    if (iconParent) {
+      const parentText = iconParent.getAttribute('aria-label') || iconParent.textContent || '';
+      if (/リツイート|Retweet/i.test(parentText)) {
+        return true;
+      }
+    }
+  }
   
-  return retweetIndicator !== null || retweetIcon !== null || hasRetweetText;
+  // 3. ツイートの構造を確認（リツイートには通常、元のツイート主の情報が2回表示される）
+  // より確実な方法：ツイート内に複数のアカウントリンクがあり、最初のリンクがリツイートした人、2番目が元のツイート主
+  const accountLinks = Array.from(tweetElement.querySelectorAll('a[role="link"][href^="/"]'));
+  if (accountLinks.length >= 2) {
+    // 最初のリンクの後に「リツイート」というテキストがあるか確認
+    const firstLink = accountLinks[0];
+    if (firstLink) {
+      const nextSibling = firstLink.nextElementSibling;
+      if (nextSibling) {
+        const siblingText = nextSibling.textContent || '';
+        if (/リツイート|Retweeted/i.test(siblingText)) {
+          return true;
+        }
+      }
+    }
+  }
+  
+  // デフォルトはfalse（通常のツイートと判定）
+  return false;
 }
 
 // リツイートの元のツイート主のアカウント名を取得
@@ -827,7 +855,21 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
         }
         console.log(`[DEBUG] @${accountName || 'unknown'}: Is retweet: ${isRT}`);
         
-        // メニュー操作が必要な場合はキューに追加
+        // メニュー操作が必要な場合はキューに追加（重複チェック）
+        // すでにキューに追加されているツイートはスキップ
+        const alreadyInQueue = menuQueue.some(item => item.tweet === tweetEl);
+        if (alreadyInQueue) {
+          console.log(`[DEBUG] @${accountName || 'unknown'}: Already in menu queue, skipping`);
+          return;
+        }
+        
+        // メニューキューのサイズを制限（10,000件を超える場合は古いものを削除）
+        if (menuQueue.length > 10000) {
+          console.warn(`[DEBUG] Menu queue too large (${menuQueue.length}), clearing old items`);
+          // 古いアイテムを削除（最初の5000件を削除）
+          menuQueue.splice(0, 5000);
+        }
+        
         if (isRT) {
           menuQueue.push({ tweet: tweetEl, isRetweet: true, reason: "リツイート（フォローしていないアカウント）" });
           console.log(`[DEBUG] Added retweet to menu queue: @${accountName || 'unknown'}, queue length: ${menuQueue.length}`);
