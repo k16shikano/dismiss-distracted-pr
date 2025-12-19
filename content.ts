@@ -42,7 +42,7 @@ function startWatchdog(): void {
       lastProcessTime = now;
       scanTweets();
     }
-  }, 100); // 100msごとにチェック（一切止まらないようにする）
+  }, 200); // 200msごとにチェック（一切止まらないようにする）
 }
 
 // 「おすすめ」タブが選択されているかどうかを判定
@@ -828,8 +828,12 @@ const observer = new MutationObserver((mutations) => {
   let hasNewTweets = false;
   const newArticles: HTMLElement[] = [];
   
+  console.log(`[DEBUG] MutationObserver: Received ${mutations.length} mutations`);
+  
   for (const mutation of mutations) {
-    if (mutation.type === 'childList') {
+    if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+      console.log(`[DEBUG] MutationObserver: Found ${mutation.addedNodes.length} added nodes`);
+      
       for (const node of Array.from(mutation.addedNodes)) {
         if (node.nodeType === Node.ELEMENT_NODE) {
           const element = node as HTMLElement;
@@ -839,16 +843,21 @@ const observer = new MutationObserver((mutations) => {
             if (!processedTweets.has(element)) {
               newArticles.push(element);
               hasNewTweets = true;
+              console.log(`[DEBUG] MutationObserver: Found new article element directly`);
             }
           }
           // article要素を含む要素が追加された場合
           else {
             const articles = element.querySelectorAll('article');
+            if (articles.length > 0) {
+              console.log(`[DEBUG] MutationObserver: Found ${articles.length} article elements in added node`);
+            }
             for (const article of Array.from(articles)) {
               const articleEl = article as HTMLElement;
               if (!processedTweets.has(articleEl)) {
                 newArticles.push(articleEl);
                 hasNewTweets = true;
+                console.log(`[DEBUG] MutationObserver: Found new article element in subtree`);
               }
             }
           }
@@ -867,29 +876,36 @@ const observer = new MutationObserver((mutations) => {
       const inViewport = newArticles.filter(el => isInViewport(el));
       const outOfViewport = newArticles.filter(el => !isInViewport(el));
       
+      console.log(`[DEBUG] MutationObserver: ${inViewport.length} in viewport, ${outOfViewport.length} out of viewport`);
+      
       if (inViewport.length > 0) {
         console.log(`[DEBUG] MutationObserver: Processing ${inViewport.length} new tweets in viewport immediately`);
         lastProcessTime = Date.now();
         processTweetsInParallel(inViewport).catch((error) => {
-          console.error('Error processing new tweets:', error);
+          console.error('[DEBUG] MutationObserver: Error processing new tweets in viewport:', error);
         });
       }
       
       if (outOfViewport.length > 0) {
+        console.log(`[DEBUG] MutationObserver: Scheduling processing of ${outOfViewport.length} new tweets out of viewport`);
         setTimeout(() => {
           console.log(`[DEBUG] MutationObserver: Processing ${outOfViewport.length} new tweets out of viewport`);
           lastProcessTime = Date.now();
           processTweetsInParallel(outOfViewport).catch((error) => {
-            console.error('Error processing new tweets:', error);
+            console.error('[DEBUG] MutationObserver: Error processing new tweets out of viewport:', error);
           });
-        }, 500);
+        }, 100); // 500msから100msに短縮
       }
     }
     
     // 念のため、全体のスキャンも実行
+    console.log(`[DEBUG] MutationObserver: Scheduling scanTweets() in 100ms`);
     setTimeout(() => {
+      console.log(`[DEBUG] MutationObserver: Calling scanTweets() now`);
       scanTweets();
     }, 100);
+  } else {
+    console.log(`[DEBUG] MutationObserver: No new tweets found in this mutation batch`);
   }
 });
 
@@ -902,6 +918,9 @@ function setupObserver(): void {
                      document.querySelector('main') ||
                      document.body;
     
+    // 既存の監視を停止してから再設定
+    observer.disconnect();
+    
     observer.observe(timeline, { 
       childList: true, 
       subtree: true,
@@ -910,6 +929,22 @@ function setupObserver(): void {
     });
     
     console.log('[DEBUG] MutationObserver: Started observing', timeline);
+    
+    // 定期的にobserverが動作しているか確認し、必要に応じて再設定
+    setInterval(() => {
+      if (!isRecommendedTab()) {
+        return;
+      }
+      
+      // observerが正しく設定されているか確認
+      const currentTimeline = document.querySelector('[data-testid="primaryColumn"]') || 
+                               document.querySelector('main') ||
+                               document.body;
+      
+      // 念のため、定期的にスキャンも実行（MutationObserverが発火しない場合のフォールバック）
+      console.log('[DEBUG] Periodic scan check (fallback if MutationObserver fails)');
+      scanTweets();
+    }, 2000); // 2秒ごとにフォールバックスキャン
   } else {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
@@ -922,6 +957,19 @@ function setupObserver(): void {
 }
 
 setupObserver();
+
+// ページ遷移時にもobserverを再設定
+let lastUrl = window.location.href;
+setInterval(() => {
+  const currentUrl = window.location.href;
+  if (currentUrl !== lastUrl) {
+    console.log('[DEBUG] URL changed, re-setting up observer');
+    lastUrl = currentUrl;
+    setTimeout(() => {
+      setupObserver();
+    }, 1000);
+  }
+}, 1000);
 
 // スクロールイベントの監視を追加
 window.addEventListener('scroll', () => {
