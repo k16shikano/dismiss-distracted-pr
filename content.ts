@@ -679,12 +679,12 @@ async function processMenuQueue(): Promise<void> {
         console.error('[DEBUG] Error in processMenuQueue continuation:', error);
         // エラーが発生してもフラグをリセットして再試行
         isProcessingMenu = false;
-        setTimeout(() => processMenuQueue(), 500);
+        setTimeout(() => processMenuQueue(), 300);
       });
     } else {
       console.log(`[DEBUG] Menu queue: Queue is empty, processing complete`);
     }
-  }, 500); // 800msから500msに短縮
+  }, 300); // 500msから300msに短縮（スクロール中は高速処理）
 }
 
 // ツイートを一時的に非表示にする
@@ -1005,37 +1005,53 @@ setInterval(() => {
 
 // スクロール中に新しく表示されたツイートを即座に処理
 let isScrolling = false;
-let lastScrollTime = 0;
+let scrollCheckInterval: ReturnType<typeof setInterval> | null = null;
 
-// スクロールイベント：スクロールするたびに即座にビューポート内のツイートをチェック
+// スクロールイベント：スクロール中は定期的にビューポート内のツイートをチェック
 window.addEventListener('scroll', () => {
   // 「おすすめ」タブでない場合は処理しない
   if (!isRecommendedTab()) {
     return;
   }
   
-  const now = Date.now();
-  lastScrollTime = now;
-  
   // スクロール開始を検出
   if (!isScrolling) {
     isScrolling = true;
-    console.log('[DEBUG] Scroll started, processing viewport tweets immediately');
+    console.log('[DEBUG] Scroll started, starting continuous viewport check');
+    
+    // 即座に1回チェック
+    scanTweetsInViewportImmediate();
+    
+    // スクロール中は100msごとにビューポート内のツイートをチェック
+    if (scrollCheckInterval) {
+      clearInterval(scrollCheckInterval);
+    }
+    scrollCheckInterval = setInterval(() => {
+      if (isScrolling && isRecommendedTab()) {
+        scanTweetsInViewportImmediate();
+      } else {
+        if (scrollCheckInterval) {
+          clearInterval(scrollCheckInterval);
+          scrollCheckInterval = null;
+        }
+      }
+    }, 100); // 100msごとにチェック
   }
   
-  // スクロールするたびに即座にビューポート内のツイートをチェック（遅延なし）
-  scanTweetsInViewportImmediate();
-  
-  // スクロール停止を検出（150ms後に停止とみなす）
+  // スクロール停止を検出（200ms後に停止とみなす）
   if (scrollTimeout) {
     clearTimeout(scrollTimeout);
   }
   scrollTimeout = setTimeout(() => {
     isScrolling = false;
+    if (scrollCheckInterval) {
+      clearInterval(scrollCheckInterval);
+      scrollCheckInterval = null;
+    }
     console.log('[DEBUG] Scroll stopped');
     scrollTimeout = null;
-  }, 150);
-}, { passive: true }); // passive: trueでパフォーマンス向上
+  }, 200);
+}, { passive: true });
 
 // ビューポート内のツイートを即座にスキャン（スクロール中専用、高速処理）
 function scanTweetsInViewportImmediate(): void {
@@ -1048,36 +1064,35 @@ function scanTweetsInViewportImmediate(): void {
     const tweetArticles = Array.from(document.querySelectorAll('article')) as HTMLElement[];
     const tweetsInViewport: HTMLElement[] = [];
     
-    // ビューポートの境界を事前に計算（パフォーマンス向上）
-    const viewportTop = window.scrollY;
-    const viewportBottom = viewportTop + window.innerHeight;
-    
-    // ビューポート内の未処理ツイートを収集（制限なし、スクロール中はすべて処理）
+    // ビューポート内の未処理ツイートを収集
     for (const tweetEl of tweetArticles) {
       // すでに処理済みのツイートはスキップ
       if (processedTweets.has(tweetEl)) {
         continue;
       }
       
-      // ビューポート判定を高速化（getBoundingClientRectを使用）
-      const rect = tweetEl.getBoundingClientRect();
-      const elementTop = rect.top + window.scrollY;
-      const elementBottom = elementTop + rect.height;
-      
-      // ビューポート内かどうかを判定（少し余裕を持たせる）
-      if (elementBottom >= viewportTop - 100 && elementTop <= viewportBottom + 100) {
+      // ビューポート内かどうかを判定（isInViewportを使用）
+      if (isInViewport(tweetEl)) {
         tweetsInViewport.push(tweetEl);
       }
     }
     
     if (tweetsInViewport.length > 0) {
       lastProcessTime = Date.now();
-      console.log(`[DEBUG] Scroll: Processing ${tweetsInViewport.length} new tweets in viewport immediately`);
+      console.log(`[DEBUG] Scroll: Found ${tweetsInViewport.length} new tweets in viewport, processing immediately`);
       
-      // 即座に処理を開始（非ブロッキング）
+      // 即座に処理を開始
       processTweetsInParallel(tweetsInViewport).catch((error) => {
         console.error('Error in processTweetsInParallel (scroll viewport):', error);
       });
+      
+      // メニューキューの処理を確実に開始
+      if (menuQueue.length > 0) {
+        console.log(`[DEBUG] Scroll: Starting menu queue processing, queue length: ${menuQueue.length}`);
+        processMenuQueue().catch((error) => {
+          console.error('Error in processMenuQueue (scroll):', error);
+        });
+      }
     }
   } catch (error) {
     console.error('Error in scanTweetsInViewportImmediate:', error);
