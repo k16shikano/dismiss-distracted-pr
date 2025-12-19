@@ -560,68 +560,66 @@ function scanTweets(): void {
       return;
     }
     
-    // 処理フラグを削除：一切止まらないようにするため、常に処理を実行
-    
-    const tweetArticles = document.querySelectorAll('article');
-    console.log(`[DEBUG] Found ${tweetArticles.length} article elements`);
-    
-    if (tweetArticles.length === 0) {
-      return;
-    }
-    
-    // 処理対象のツイートを収集（ビューポート内を優先）
+    // ビューポート内の未処理ツイートのみを優先的に処理（軽量化）
+    const tweetArticles = Array.from(document.querySelectorAll('article')) as HTMLElement[];
     const tweetsInViewport: HTMLElement[] = [];
-    const tweetsOutOfViewport: HTMLElement[] = [];
     
-    tweetArticles.forEach((article) => {
-      const tweetEl = article as HTMLElement;
+    // ビューポート内のツイートのみを収集（最大20件まで）
+    let count = 0;
+    for (const tweetEl of tweetArticles) {
+      if (count >= 20) break; // 一度に処理するツイート数を制限
       
       // すでに処理済みのツイートはスキップ
       if (processedTweets.has(tweetEl)) {
-        return;
+        continue;
       }
       
-      // ビューポート内のツイートを優先的に処理
+      // ビューポート内のツイートのみを処理
       if (isInViewport(tweetEl)) {
         tweetsInViewport.push(tweetEl);
-      } else {
-        tweetsOutOfViewport.push(tweetEl);
+        count++;
       }
-    });
+    }
     
-    console.log(`[DEBUG] Found ${tweetsInViewport.length} tweets in viewport, ${tweetsOutOfViewport.length} tweets out of viewport`);
-    
-    // ビューポート内のツイートを優先的に処理
     if (tweetsInViewport.length > 0) {
       lastProcessTime = Date.now();
-      console.log(`[DEBUG] Starting to process ${tweetsInViewport.length} tweets in viewport (priority)`);
+      console.log(`[DEBUG] Processing ${tweetsInViewport.length} tweets in viewport (priority, non-blocking)`);
       
-      // ビューポート内のツイートを先に処理
+      // 非ブロッキングで処理を開始（完了を待たない）
       processTweetsInParallel(tweetsInViewport).catch((error) => {
         console.error('Error in processTweetsInParallel (viewport):', error);
-        setTimeout(() => scanTweets(), 100);
       });
     }
     
-    // ビューポート外のツイートは後で処理（ビューポート内の処理と並行して実行可能）
-    if (tweetsOutOfViewport.length > 0) {
-      // ビューポート内の処理が完了してから処理（少し待ってから）
-      setTimeout(() => {
-        lastProcessTime = Date.now();
-        console.log(`[DEBUG] Starting to process ${tweetsOutOfViewport.length} tweets out of viewport`);
+    // ビューポート外のツイートは別途処理（バッチ処理）
+    // すぐに次のスキャンを開始できるように、非同期で処理
+    setTimeout(() => {
+      const tweetsOutOfViewport: HTMLElement[] = [];
+      let outCount = 0;
+      
+      for (const tweetEl of tweetArticles) {
+        if (outCount >= 10) break; // ビューポート外は一度に10件まで
+        
+        if (processedTweets.has(tweetEl)) {
+          continue;
+        }
+        
+        if (!isInViewport(tweetEl)) {
+          tweetsOutOfViewport.push(tweetEl);
+          outCount++;
+        }
+      }
+      
+      if (tweetsOutOfViewport.length > 0) {
+        console.log(`[DEBUG] Processing ${tweetsOutOfViewport.length} tweets out of viewport (background)`);
         processTweetsInParallel(tweetsOutOfViewport).catch((error) => {
           console.error('Error in processTweetsInParallel (out of viewport):', error);
         });
-      }, tweetsInViewport.length > 0 ? 1000 : 0);
-    }
+      }
+    }, 200); // 200ms後にバックグラウンド処理
     
-    if (tweetsInViewport.length === 0 && tweetsOutOfViewport.length === 0) {
-      closePremiumPlusModal();
-      return;
-    }
-    
-    // 処理完了を待たずに、すぐに次のスキャンを開始（一切止まらないようにする）
-    setTimeout(() => scanTweets(), 500);
+    // すぐに次のスキャンを開始（処理完了を待たない）
+    setTimeout(() => scanTweets(), 300); // 300ms後に次のスキャン
   } catch (error) {
     console.error('Error in scanTweets:', error);
     // エラーが発生しても即座に再開
@@ -809,20 +807,24 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
     console.log(`[DEBUG] Added promise to array, total promises: ${promises.length}`);
   }
   
-  console.log(`[DEBUG] Starting to await ${promises.length} promises`);
-  // すべての処理が完了するまで待機（エラーがあっても続行）
-  try {
-    await Promise.allSettled(promises);
-    console.log(`[DEBUG] All promises settled`);
-  } catch (error) {
-    console.error(`[DEBUG] Error in Promise.allSettled:`, error);
-  }
+  // 非ブロッキング：promiseの完了を待たずに即座に返す
+  // メニューキューの処理は別途継続的に実行される
+  console.log(`[DEBUG] Started ${promises.length} promises (non-blocking)`);
   
-  // メニューキューを確実に処理開始
-  console.log(`[DEBUG] Ensuring menu queue processing starts, queue length: ${menuQueue.length}`);
-  processMenuQueue().catch((error) => {
-    console.error(`[DEBUG] Error in final processMenuQueue call:`, error);
+  // バックグラウンドでpromiseの完了を待つ（エラーをログに記録するだけ）
+  Promise.allSettled(promises).then(() => {
+    console.log(`[DEBUG] All ${promises.length} promises settled`);
+  }).catch((error) => {
+    console.error(`[DEBUG] Error in Promise.allSettled:`, error);
   });
+  
+  // メニューキューを確実に処理開始（非ブロッキング）
+  if (menuQueue.length > 0) {
+    console.log(`[DEBUG] Ensuring menu queue processing starts, queue length: ${menuQueue.length}`);
+    processMenuQueue().catch((error) => {
+      console.error(`[DEBUG] Error in processMenuQueue call:`, error);
+    });
+  }
   
   // メニューキューが空になるまで待機
   while (menuQueue.length > 0 || isProcessingMenu) {
