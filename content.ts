@@ -315,11 +315,11 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
     const accountName = getAccountName(tweetElement);
     console.log(`[DEBUG] Checking and potentially dismissing @${accountName || 'unknown'}: ${reason}`);
     
-    // タイムアウトを設定（10秒で強制解決）
+    // タイムアウトを設定（5秒で強制解決、スクロール中は処理を中断）
     const timeoutId = setTimeout(() => {
       console.warn(`[DEBUG] @${accountName || 'unknown'}: Timeout in checkAndDismissTweet, resolving as false`);
-      resolve(false);
-    }, 10000);
+      safeResolve(false);
+    }, 5000); // 10秒から5秒に短縮
     
     // 解決時にタイムアウトをクリアする関数
     const safeResolve = (value: boolean) => {
@@ -352,7 +352,7 @@ function checkAndDismissTweet(tweetElement: HTMLElement, reason: string): Promis
     
     // メニューが表示されるまで待つ（ポーリングで確認）
     let attempts = 0;
-    const maxAttempts = 20; // 最大2秒待つ（100ms × 20）
+    const maxAttempts = 10; // 最大1秒待つ（100ms × 10、スクロール中は高速処理）
     
     const checkMenu = () => {
       const menuItems = Array.from(document.querySelectorAll('[role="menuitem"]')) as HTMLElement[];
@@ -660,6 +660,12 @@ async function processMenuQueue(): Promise<void> {
     return;
   }
   
+  // スクロール中は処理を一時停止（スクロール停止後に再開）
+  if (isScrolling) {
+    console.log(`[DEBUG] Menu queue: Scrolling, deferring processing (queue length: ${menuQueue.length})`);
+    return;
+  }
+  
   isProcessingMenu = true;
   const item = menuQueue.shift();
   if (!item) {
@@ -669,6 +675,17 @@ async function processMenuQueue(): Promise<void> {
   
   const queueLength = menuQueue.length;
   console.log(`[DEBUG] Menu queue: Processing item, remaining in queue: ${queueLength}`);
+  
+  // タイムアウトを設定（処理が止まらないように）
+  const processingTimeout = setTimeout(() => {
+    console.warn(`[DEBUG] Menu queue: Processing timeout, forcing completion`);
+    isProcessingMenu = false;
+    processedTweets.add(item.tweet);
+    // 次の処理を開始
+    if (menuQueue.length > 0) {
+      processMenuQueue();
+    }
+  }, 6000); // 6秒でタイムアウト
   
   try {
     const { tweet, isRetweet, reason } = item;
@@ -681,17 +698,21 @@ async function processMenuQueue(): Promise<void> {
       await checkAndDismissTweet(tweet, reason);
     }
     
+    clearTimeout(processingTimeout);
     processedTweets.add(tweet);
     console.log(`[DEBUG] Menu queue: Completed processing @${accountName || 'unknown'}`);
   } catch (error) {
+    clearTimeout(processingTimeout);
     console.error('Error processing menu queue:', error);
+    // エラーが発生してもツイートを処理済みとしてマーク（無限ループを防ぐ）
+    processedTweets.add(item.tweet);
   }
   
   // 次のメニュー操作を処理（少し待ってから）
   setTimeout(() => {
     isProcessingMenu = false;
     // 確実に次の処理を開始
-    if (menuQueue.length > 0) {
+    if (menuQueue.length > 0 && !isScrolling) {
       console.log(`[DEBUG] Menu queue: Continuing with ${menuQueue.length} items remaining`);
       // 即座に次の処理を開始（ウォッチドッグに任せない）
       processMenuQueue().catch((error) => {
@@ -700,15 +721,19 @@ async function processMenuQueue(): Promise<void> {
         isProcessingMenu = false;
         // ウォッチドッグが拾うように少し待つ
         setTimeout(() => {
-          if (menuQueue.length > 0 && !isProcessingMenu) {
+          if (menuQueue.length > 0 && !isProcessingMenu && !isScrolling) {
             processMenuQueue();
           }
         }, 100);
       });
     } else {
-      console.log(`[DEBUG] Menu queue: Queue is empty, processing complete`);
+      if (isScrolling) {
+        console.log(`[DEBUG] Menu queue: Scrolling, will resume after scroll stops`);
+      } else {
+        console.log(`[DEBUG] Menu queue: Queue is empty, processing complete`);
+      }
     }
-  }, 200); // 300msから200msに短縮（より高速に処理）
+  }, 200); // 200ms待機
 }
 
 // ツイートを一時的に非表示にする
