@@ -896,9 +896,26 @@ const observer = new MutationObserver((mutations) => {
       if (inViewport.length > 0) {
         console.log(`[DEBUG] MutationObserver: Processing ${inViewport.length} new tweets in viewport immediately`);
         lastProcessTime = Date.now();
+        // スクロール中かどうかに関わらず、ビューポート内のツイートは即座に処理
         processTweetsInParallel(inViewport).catch((error) => {
           console.error('[DEBUG] MutationObserver: Error processing new tweets in viewport:', error);
         });
+      }
+      
+      // スクロール中の場合、ビューポート外のツイートも即座にチェック（スクロールで表示される可能性がある）
+      if (isScrolling && outOfViewport.length > 0) {
+        // スクロール中は、ビューポート外のツイートも少し待ってから処理（スクロールで表示される可能性がある）
+        setTimeout(() => {
+          // 再度ビューポート判定（スクロールで表示された可能性がある）
+          const nowInViewport = outOfViewport.filter(el => isInViewport(el));
+          if (nowInViewport.length > 0) {
+            console.log(`[DEBUG] MutationObserver: ${nowInViewport.length} tweets moved into viewport during scroll, processing immediately`);
+            lastProcessTime = Date.now();
+            processTweetsInParallel(nowInViewport).catch((error) => {
+              console.error('[DEBUG] MutationObserver: Error processing tweets moved into viewport:', error);
+            });
+          }
+        }, 50); // 50ms後に再チェック
       }
       
       if (outOfViewport.length > 0) {
@@ -988,49 +1005,39 @@ setInterval(() => {
 
 // スクロール中に新しく表示されたツイートを即座に処理
 let isScrolling = false;
-let scrollCheckInterval: ReturnType<typeof setInterval> | null = null;
+let lastScrollTime = 0;
 
+// スクロールイベント：スクロールするたびに即座にビューポート内のツイートをチェック
 window.addEventListener('scroll', () => {
   // 「おすすめ」タブでない場合は処理しない
   if (!isRecommendedTab()) {
     return;
   }
   
+  const now = Date.now();
+  lastScrollTime = now;
+  
   // スクロール開始を検出
   if (!isScrolling) {
     isScrolling = true;
-    console.log('[DEBUG] Scroll started, starting immediate viewport check');
-    
-    // スクロール中は即座にビューポート内のツイートをチェック
-    scanTweetsInViewportImmediate();
-    
-    // スクロール中は50msごとにビューポート内のツイートをチェック
-    if (scrollCheckInterval) {
-      clearInterval(scrollCheckInterval);
-    }
-    scrollCheckInterval = setInterval(() => {
-      if (isScrolling && isRecommendedTab()) {
-        scanTweetsInViewportImmediate();
-      }
-    }, 50); // 50msごとにチェック（スクロール中は頻繁にチェック）
+    console.log('[DEBUG] Scroll started, processing viewport tweets immediately');
   }
   
-  // スクロール停止を検出（200ms後に停止とみなす）
+  // スクロールするたびに即座にビューポート内のツイートをチェック（遅延なし）
+  scanTweetsInViewportImmediate();
+  
+  // スクロール停止を検出（150ms後に停止とみなす）
   if (scrollTimeout) {
     clearTimeout(scrollTimeout);
   }
   scrollTimeout = setTimeout(() => {
     isScrolling = false;
-    if (scrollCheckInterval) {
-      clearInterval(scrollCheckInterval);
-      scrollCheckInterval = null;
-    }
     console.log('[DEBUG] Scroll stopped');
     scrollTimeout = null;
-  }, 200);
-});
+  }, 150);
+}, { passive: true }); // passive: trueでパフォーマンス向上
 
-// ビューポート内のツイートを即座にスキャン（スクロール中専用）
+// ビューポート内のツイートを即座にスキャン（スクロール中専用、高速処理）
 function scanTweetsInViewportImmediate(): void {
   try {
     if (!isRecommendedTab()) {
@@ -1041,6 +1048,10 @@ function scanTweetsInViewportImmediate(): void {
     const tweetArticles = Array.from(document.querySelectorAll('article')) as HTMLElement[];
     const tweetsInViewport: HTMLElement[] = [];
     
+    // ビューポートの境界を事前に計算（パフォーマンス向上）
+    const viewportTop = window.scrollY;
+    const viewportBottom = viewportTop + window.innerHeight;
+    
     // ビューポート内の未処理ツイートを収集（制限なし、スクロール中はすべて処理）
     for (const tweetEl of tweetArticles) {
       // すでに処理済みのツイートはスキップ
@@ -1048,8 +1059,13 @@ function scanTweetsInViewportImmediate(): void {
         continue;
       }
       
-      // ビューポート内のツイートのみを処理
-      if (isInViewport(tweetEl)) {
+      // ビューポート判定を高速化（getBoundingClientRectを使用）
+      const rect = tweetEl.getBoundingClientRect();
+      const elementTop = rect.top + window.scrollY;
+      const elementBottom = elementTop + rect.height;
+      
+      // ビューポート内かどうかを判定（少し余裕を持たせる）
+      if (elementBottom >= viewportTop - 100 && elementTop <= viewportBottom + 100) {
         tweetsInViewport.push(tweetEl);
       }
     }
