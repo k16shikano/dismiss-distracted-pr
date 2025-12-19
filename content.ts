@@ -702,7 +702,12 @@ async function processTweetsInParallel(tweets: HTMLElement[]): Promise<void> {
     }
     
     const promise = (async () => {
-      const accountName = getAccountName(tweetEl);
+      let accountName: string | null = null;
+      try {
+        accountName = getAccountName(tweetEl);
+      } catch (error) {
+        console.error('[DEBUG] Error getting account name:', error);
+      }
       console.log(`[DEBUG] Processing tweet: @${accountName || 'unknown'}`);
       console.log(`[DEBUG] @${accountName || 'unknown'}: Promise started`);
       
